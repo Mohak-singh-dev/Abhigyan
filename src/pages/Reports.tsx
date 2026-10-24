@@ -137,7 +137,7 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
           </div>
           <div>
             <div className="text-2xl font-bold text-slate-900">11.4 Days</div>
-            <div className="text-xs text-slate-500">Average Redressal Turnaround</div>
+            <div className="text-xs text-slate-500">Avg. Redressal Turnaround (simulated)</div>
           </div>
         </Card>
 
@@ -147,7 +147,7 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
           </div>
           <div>
             <div className="text-2xl font-bold text-slate-900">92%</div>
-            <div className="text-xs text-slate-500">Overlap Redundancy Prevented</div>
+            <div className="text-xs text-slate-500">Overlap Redundancy Prevented (simulated)</div>
           </div>
         </Card>
       </div>
@@ -267,8 +267,8 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
         {/* 6-Month Intake vs Resolution Trend */}
         <Card>
           <CardHeader
-            title="6-Month Throughput Trend"
-            sub="Intake vs disposal volumes"
+            title="6-Month Intake vs Closure Trend"
+            sub="Simulated illustrative data — not sourced from live AICTE records"
           />
           <div className="h-80 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">

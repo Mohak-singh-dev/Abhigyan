@@ -537,7 +537,7 @@ export function DetailsPage({
               </span>
               <span className="flex items-center gap-1">
                 <Clock size={13} className="text-slate-400" />
-                <span>Statutory SLA Due: {fmt(c.due)}</span>
+                <span>SLA Due: {fmt(c.due)}</span>
               </span>
               <span className="flex items-center gap-1">
                 <UserCheck size={13} className="text-slate-400" />

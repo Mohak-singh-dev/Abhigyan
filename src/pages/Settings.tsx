@@ -76,9 +76,12 @@ export default function Settings() {
 
             <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 border border-slate-100 leading-relaxed">
               When two complaints against the same institution match above{' '}
-              <strong>{similarityThreshold}%</strong> based on TF-IDF semantic embeddings and keyword
-              matching, CaseTrack flags an urgent alert in both the <strong>Regulation Bureau (RB)</strong>{' '}
-              and <strong>Public Grievance Redressal Cell (PGRC)</strong> dockets.
+              <strong>{similarityThreshold}%</strong> based on institution ID, shared complaint category,
+              and keyword overlap, Abhigyan flags an overlap alert in both the <strong>Regulation Bureau (RB)</strong>{' '}
+              and <strong>Public Grievance Redressal Cell (PGRC)</strong> dockets.{' '}
+              <span className="text-slate-400 italic">
+                This threshold applies to demonstration data only and does not represent a verified AICTE policy.
+              </span>
             </div>
           </div>
         </Card>

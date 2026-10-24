@@ -90,13 +90,13 @@ export default function Sidebar({
         {!collapsed && (
           <div className="min-w-0 overflow-hidden">
             <div className="font-bold text-sm tracking-wide text-white leading-tight flex items-center gap-1.5">
-              <span>AICTE CaseTrack</span>
+              <span>Abhigyan</span>
               <span className="text-[10px] font-semibold uppercase px-1.5 py-0.2 rounded bg-teal-500/30 text-teal-200 border border-teal-400/30">
                 SIH
               </span>
             </div>
             <div className="text-[11px] text-navy-200 truncate font-normal mt-0.5">
-              Complaint Monitoring &amp; Status
+              AICTE Complaint Monitoring
             </div>
           </div>
         )}

@@ -502,8 +502,9 @@ export const initialNotifications: AppNotification[] = [
   {
     id: 'notif-2',
     type: 'warning',
-    title: 'SLA Breach: Case RB-2026-0141 Overdue',
-    message: 'Case RB-2026-0141 has exceeded the 14-day statutory resolution threshold by 13 days.',
+    title: 'SLA Alert: Case RB-2026-0141 Overdue',
+    message:
+      'Case RB-2026-0141 has exceeded the configured 14-day resolution window (demonstration threshold) by 13 days.',
     timestamp: '2026-10-24 11:15',
     caseId: 'RB-2026-0141',
     read: false,

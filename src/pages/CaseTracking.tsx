@@ -243,8 +243,8 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
           {/* SLA Performance Card */}
           <Card className="border-t-4 border-t-amber-500">
             <CardHeader
-              title="Statutory SLA Status"
-              sub="Rule 14 of AICTE Grievance Redressal Regulations"
+              title="SLA Resolution Status"
+              sub="SLA windows are configurable in Settings (demonstration values only)"
             />
 
             <div className="space-y-4">
@@ -278,8 +278,8 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
                   <span className="font-semibold text-slate-800">{fmt(activeComplaint.date)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Statutory SLA Window:</span>
-                  <span className="font-semibold text-slate-800">14 Business Days</span>
+                  <span className="text-slate-500">Configured SLA Window:</span>
+                  <span className="font-semibold text-slate-800">14 Days (demo setting)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Bureau Jurisdiction:</span>

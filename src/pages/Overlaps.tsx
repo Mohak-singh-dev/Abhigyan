@@ -61,8 +61,8 @@ export default function Overlaps({ complaints, onOpen }: OverlapsProps) {
     <div className="space-y-6">
       <PageTitle
         title="Cross-Bureau Overlap Detection"
-        sub="Algorithmic cross-reference matching duplicate or related complaints across Regulation Bureau (RB) and Grievance Cell (PGRC)"
-        tag="SIH AI Engine"
+        sub="Rule-based cross-reference matching to identify duplicate or related complaints across Regulation Bureau (RB) and Grievance Cell (PGRC)"
+        tag="SIH Demo Module"
       />
 
       {/* Explanatory Banner */}
@@ -78,10 +78,10 @@ export default function Overlaps({ complaints, onOpen }: OverlapsProps) {
             <p className="text-xs text-slate-600 leading-relaxed max-w-4xl">
               Institutions frequently face simultaneous inquiries when students file grievances with{' '}
               <strong>PGRC</strong> (e.g. fees, faculty shortages) while parents or whistleblowers
-              submit parallel complaints to the <strong>Regulation Bureau (RB)</strong>. The AICTE
-              CaseTrack engine clusters related dockets based on institution ID, natural language
-              similarity, category intersection, and timeline proximity to prevent conflicting bureau
-              orders and eliminate duplicated effort.
+              submit parallel complaints to the <strong>Regulation Bureau (RB)</strong>. This module
+              clusters related dockets based on institution ID, category intersection, shared keywords,
+              and timeline proximity to surface potential overlaps for officer review.
+              <span className="block mt-1 text-slate-400 italic">All match scores are computed from simulated demo data and do not reflect live AI output.</span>
             </p>
           </div>
         </div>
@@ -196,7 +196,7 @@ export default function Overlaps({ complaints, onOpen }: OverlapsProps) {
                       {overlap.similarity}% Match
                     </div>
                     <div className="text-[10px] font-semibold text-slate-400 uppercase">
-                      Confidence Score
+                      Match Score
                     </div>
                   </div>
 

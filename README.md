@@ -1,90 +1,142 @@
-# AICTE CaseTrack
-### Integrated Complaint Monitoring & Status Dashboard (SIH Project)
+﻿# Abhigyan
 
-A specialized governance portal engineered for the **All India Council for Technical Education (AICTE)** to monitor, cross-reference, and adjudicate institution-related grievances across AICTE bureaus and cells—specifically highlighting **Regulation Bureau (RB)** and the **Public Grievance Redressal Cell (PGRC)**.
+**Integrated Complaint Monitoring and Status Dashboard**
+SIH (Smart India Hackathon) Project — AICTE
 
----
+A governance portal prototype for the All India Council for Technical Education (AICTE) to monitor, cross-reference, and adjudicate institution-related grievances across AICTE bureaus — specifically the Regulation Bureau (RB) and the Public Grievance Redressal Cell (PGRC).
 
-## 🏛️ Key Capabilities
-
-- **Cross-Bureau Overlap Detection**: Algorithmically identifies duplicate or related complaints filed simultaneously across RB and PGRC for the same technical institution, displaying matching confidence scores (up to 94%) and corroborating evidence points.
-- **Statutory SLA Surveillance**: Automated countdown tracker enforcing the 14-day statutory resolution window under AICTE Grievance Regulations, flagging overdue cases with warning banners.
-- **Executive & Case Officer Perspectives**: Seamless role toggle between **Central Admin (Dr. S. Mehta)** and **Grievance Officer (Rajesh Kumar)**.
-- **Complete Institutional Audit Trail**: Timestamped chronological timeline recording verification, bureau transfers, hearings, and compliance releases.
-- **Institution Directory & Risk Profiles**: Campus registry profiling complaint density, approved intake flags, and affiliation history.
-- **Data Analytics & Visual Reporting**: Real-time charts covering bureau distribution, severity categorization, resolution throughput, and monthly trends.
+> **Demonstration Notice:** All data, match scores, SLA thresholds, and resolution metrics in this prototype are simulated and do not represent verified AICTE policy, live records, or official government data.
 
 ---
 
-## 🚀 Running the Project
+## Key Capabilities
+
+- **Cross-Bureau Overlap Detection:** Rule-based cross-referencing to identify duplicate or related complaints filed simultaneously across RB and PGRC for the same institution. Match scores are computed from keyword overlap, institution ID, and category intersection on simulated demo data.
+- **Configurable SLA Surveillance:** Countdown tracker enforcing a configurable resolution window (default: 14 days in Settings). Overdue cases are highlighted with warning banners. The 14-day default is a demonstration value and not a verified statutory deadline.
+- **Role Toggle (Admin / Officer):** Simulate different user perspectives between Central Admin (Dr. S. Mehta) and Case Officer (Rajesh Kumar) for demonstration purposes.
+- **Complete Audit Trail:** Timestamped chronological timeline recording verification, bureau assignments, hearings, and officer notes for each case.
+- **Institution Directory and Risk Profiles:** Campus registry showing complaint density, active case counts, and risk levels per institution.
+- **Data Analytics and Visual Reporting:** Charts covering bureau distribution, priority severity, resolution status, and illustrative monthly trends (Recharts).
+
+---
+
+## Tech Stack
+
+| Layer      | Technology                                |
+|------------|-------------------------------------------|
+| Framework  | React 18 (Vite 5)                         |
+| Language   | TypeScript                                |
+| Styling    | Tailwind CSS 3 (custom navy palette)      |
+| Icons      | Lucide React                              |
+| Charts     | Recharts                                  |
+| Backend    | Planned — FastAPI + PostgreSQL (not yet implemented) |
+
+---
+
+## Running the Project
 
 ### Prerequisites
-- Node.js (v18+ recommended)
-- npm or yarn
 
-### 1. Installation
+- Node.js v18 or later
+- npm
+
+### 1. Install dependencies
+
 ```bash
 npm install
 ```
 
-### 2. Start Development Server
+### 2. Start development server
+
 ```bash
 npm run dev
 ```
-The application will launch at: **`http://localhost:5173/`**
 
-### 3. Production Build
+The application will be available at `http://localhost:5173/`
+
+### 3. Production build
+
 ```bash
 npm run build
 ```
 
+Output is placed in the `dist/` directory.
+
+### 4. Preview production build
+
+```bash
+npm run preview
+```
+
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
-AICTE_CASE_TRACK/
+Abhigyan/
 ├── src/
 │   ├── components/
 │   │   ├── layout/
-│   │   │   ├── AppLayout.tsx      # Core application shell & responsive container
-│   │   │   ├── Sidebar.tsx        # Dark navy (#0b2250) navigation with bureau badges & role toggle
-│   │   │   └── TopBar.tsx         # Header with global search, notification dropdown, and officer profile
-│   │   ├── ComplaintTable.tsx     # Reusable, sortable government-grade complaints table
-│   │   └── ui.tsx                 # Design system (Cards, Badges, Stats, Buttons, Modals, Search)
+│   │   │   ├── AppLayout.tsx      # Application shell and responsive layout
+│   │   │   ├── Sidebar.tsx        # Navy sidebar with navigation and role toggle
+│   │   │   └── TopBar.tsx         # Top bar with notifications and global search
+│   │   ├── ComplaintTable.tsx     # Reusable sortable complaints table
+│   │   └── ui.tsx                 # Shared design system (Card, Badge, Button, Modal, etc.)
 │   ├── pages/
-│   │   ├── Dashboard.tsx          # Executive dashboard with KPI metrics & bureau charts
-│   │   ├── Complaints.tsx         # All Complaints directory + comprehensive Case File Details view
-│   │   ├── Institutions.tsx       # Institutional registry & campus complaint dossier
-│   │   ├── Overlaps.tsx           # Cross-bureau duplicate detection with side-by-side comparison
-│   │   ├── CaseTracking.tsx       # Live SLA milestone tracker & statutory progress monitor
-│   │   ├── Reports.tsx            # Data analytics & visual charts (Recharts)
-│   │   ├── Notifications.tsx      # System notification feed & breach alert center
-│   │   ├── UserManagement.tsx     # Bureau officer registry, assignment tracker & personnel roster
-│   │   └── Settings.tsx           # Overlap similarity threshold & statutory SLA settings
-│   ├── types.ts                   # TypeScript interfaces (Complaint, Institution, Overlap, etc.)
-│   ├── data.ts                    # Realistic domain-specific demo data for AICTE SIH
-│   ├── App.tsx                    # Root component with local state & view router
-│   ├── index.css                  # Tailwind styles & custom government scrollbars
+│   │   ├── Dashboard.tsx          # Executive dashboard with KPI metrics and charts
+│   │   ├── Complaints.tsx         # All Complaints directory and Case Details view
+│   │   ├── Institutions.tsx       # Institution registry and per-campus complaint history
+│   │   ├── Overlaps.tsx           # Cross-bureau overlap detection and officer review
+│   │   ├── CaseTracking.tsx       # Case lifecycle stepper and SLA countdown
+│   │   ├── Reports.tsx            # Analytics and illustrative chart reports
+│   │   ├── Notifications.tsx      # System notification feed
+│   │   ├── UserManagement.tsx     # Officer roster and case assignment overview
+│   │   └── Settings.tsx           # Configurable SLA thresholds and overlap sensitivity
+│   ├── types.ts                   # Shared TypeScript interfaces (Complaint, Institution, Overlap, etc.)
+│   ├── data.ts                    # Simulated demo data and helper functions
+│   ├── App.tsx                    # Root component with state management and view router
+│   ├── index.css                  # Tailwind base styles
 │   └── main.tsx                   # React DOM entry point
-├── index.html                     # HTML5 shell with Inter typography & government branding
-├── package.json                   # Dependencies (React 18, Vite 5, Tailwind CSS 3, Lucide, Recharts)
-├── tailwind.config.js             # Navy palette & theme extension
-├── tsconfig.json                  # TypeScript bundler compiler configuration
-└── vite.config.ts                 # Vite development & build configuration
+├── index.html                     # HTML shell with Inter font
+├── package.json                   # Project metadata and dependencies
+├── tailwind.config.js             # Tailwind CSS theme extension (navy palette)
+├── tsconfig.json                  # TypeScript configuration
+└── vite.config.ts                 # Vite build configuration
 ```
 
 ---
 
-## 🎨 Design System Specifications
+## Core Workflow
 
-- **Sidebar**: Dark Navy (`#0b2250`), subtle borders (`border-white/10`), active teal indicator (`#14b8a6`), collapsible toggle.
-- **Main Viewport**: Light grey background (`#f8fafc` / `bg-slate-50`), rounded cards (`rounded-xl border border-slate-200/80`), subtle elevations.
-- **Typography**: Inter / system-ui clean government type with clear hierarchy.
-- **Bureaus Highlighted**:
+The prototype demonstrates this officer workflow:
+
+1. **Institution Directory** — Browse registered institutions, filter by state or type, and select a campus to view its full complaint history.
+2. **Institution Profile** — See risk level, active vs resolved complaint counts, and the complaint dossier for the selected institution.
+3. **Complaint Details** — Open a case file to read the full narrative, view the chronological audit trail, reassign the officer, change case status, and log investigation notes.
+4. **Potential Overlap Review** — Navigate to the Overlap Detection page to review flagged complaint pairs, read the matching reasons, and decide to link cases or keep them as separate files. Officers must make this decision; no automatic merging or case closure occurs.
+5. **Officer Decision** — All status changes, assignments, and overlap decisions are officer-initiated actions logged to the case timeline.
+6. **Chronological Action History** — The full audit trail is visible in Case Details and the Case Tracking page.
+
+---
+
+## Design System
+
+- **Sidebar:** Dark navy (`#0b2250`), active teal indicator (`#14b8a6`), collapsible
+- **Main viewport:** Light grey (`bg-slate-50`), rounded white cards
+- **Typography:** Inter (via system-ui fallback)
+- **Bureaus:**
   - `RB` — Regulation Bureau
   - `PGRC` — Public Grievance Redressal Cell
   - `Approval` — Approval Bureau
   - `Academic` — Academic Bureau
   - `SB` — Skill Bureau
   - `EO` — Executive Office
+
+---
+
+## Planned Next Steps
+
+- FastAPI backend with PostgreSQL for persistent case storage
+- JWT-based authentication with role enforcement
+- Real complaint intake form with file attachment support
+- Officer workload assignment engine

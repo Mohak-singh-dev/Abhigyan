@@ -105,10 +105,10 @@ export default function Dashboard({
             </div>
             <div>
               <h4 className="text-sm font-bold">
-                {overdueCases} Case{overdueCases > 1 ? 's' : ''} Exceeded Statutory SLA Threshold
+                {overdueCases} Case{overdueCases > 1 ? 's' : ''} Exceeded Configured SLA Window
               </h4>
               <p className="text-xs text-red-700 mt-0.5">
-                Immediate review requested for RB and PGRC grievance files overdue past 14 days.
+                Immediate review recommended for RB and PGRC grievance files overdue beyond the configured SLA window.
               </p>
             </div>
           </div>
@@ -288,7 +288,7 @@ export default function Dashboard({
               Monitoring duplicate grievances filed across{' '}
               <strong className="text-indigo-800">Regulation Bureau (RB)</strong> and{' '}
               <strong className="text-teal-800">Public Grievance Redressal Cell (PGRC)</strong>. 5 potential overlaps
-              identified with AI similarity confidence up to 94%.
+              identified with matching confidence scores up to 94% (demonstration logic based on keyword and institution matching).
             </p>
           </div>
           <Button
