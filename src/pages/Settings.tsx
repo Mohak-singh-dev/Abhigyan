@@ -38,7 +38,7 @@ export default function Settings() {
       {savedBanner && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 shadow-2xs animate-in fade-in">
           <CheckCircle2 size={16} className="text-emerald-600" />
-          <span>Configuration successfully updated in local AICTE CaseTrack environment!</span>
+          <span>Configuration successfully updated in local Abhigyan environment!</span>
         </div>
       )}
 

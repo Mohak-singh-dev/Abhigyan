@@ -9,7 +9,7 @@ export default function Login({ onLogin }: { onLogin: (r: Role) => void }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="hidden flex-col justify-between bg-navy-900 p-12 text-white lg:flex">
-        <div className="flex items-center gap-3 text-lg font-semibold"><Landmark /> AICTE</div>
+        <div className="flex items-center gap-3 text-lg font-semibold"><Landmark /> Abhigyan • AICTE</div>
         <div>
           <h1 className="text-4xl font-semibold leading-tight">Integrated Complaint<br />Monitoring Dashboard</h1>
           <p className="mt-4 max-w-md text-navy-200">One view of institution complaints across the Regulation Bureau and PGRC. Spot overlaps early, track deadlines and close cases faster.</p>

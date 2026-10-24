@@ -147,7 +147,7 @@ export function ComplaintsPage({
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
     link.setAttribute('href', encodedUri)
-    link.setAttribute('download', `AICTE_CaseTrack_Complaints_${TODAY}.csv`)
+    link.setAttribute('download', `Abhigyan_Complaints_${TODAY}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -300,7 +300,7 @@ export function ComplaintsPage({
         open={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         title="Register New Institution Complaint"
-        subtitle="Log a formal grievance or regulatory non-compliance file into AICTE CaseTrack"
+        subtitle="Log a formal grievance or regulatory non-compliance file into Abhigyan"
       >
         <form onSubmit={handleCreateComplaint} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -583,7 +583,7 @@ export function DetailsPage({
           <Card>
             <CardHeader
               title="Complaint Substance &amp; Allegations"
-              sub="Official grievance statement filed on AICTE CaseTrack"
+              sub="Official grievance statement filed on Abhigyan"
             />
             <div className="rounded-lg bg-slate-50/80 p-4 border border-slate-200/60 text-slate-800 text-sm leading-relaxed whitespace-pre-line">
               {c.description}

@@ -3,6 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "description": "Integrated Dashboard for Monitoring and Tracking Institution-Related Complaint Cases Across AICTE Bureaus/Cells",
+  "author": "nooralam08",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nooralam08/Abhigyan.git"
+  },
+  "homepage": "https://github.com/nooralam08/Abhigyan#readme",
   "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" },
   "dependencies": {
     "lucide-react": "^0.453.0",

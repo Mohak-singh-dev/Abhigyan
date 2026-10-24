@@ -380,7 +380,7 @@ export default function TopBar({
 
                   <div className="pt-1">
                     <div className="px-3 py-2 text-[10px] text-slate-400 leading-tight">
-                      AICTE CaseTrack SIH Edition • Production Frontend Prototype
+                      Abhigyan SIH Edition • AICTE Complaint Monitoring Prototype
                     </div>
                   </div>
                 </div>

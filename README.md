@@ -1,9 +1,13 @@
-﻿# Abhigyan
+# Abhigyan
 
-**Integrated Complaint Monitoring and Status Dashboard**
-SIH (Smart India Hackathon) Project — AICTE
+**Integrated Dashboard for Monitoring and Tracking Institution-Related Complaint Cases Across AICTE Bureaus/Cells**
+Smart India Hackathon (SIH) Project — AICTE
 
-A governance portal prototype for the All India Council for Technical Education (AICTE) to monitor, cross-reference, and adjudicate institution-related grievances across AICTE bureaus — specifically the Regulation Bureau (RB) and the Public Grievance Redressal Cell (PGRC).
+- **Repository:** [https://github.com/nooralam08/Abhigyan](https://github.com/nooralam08/Abhigyan)
+- **Owner:** [nooralam08](https://github.com/nooralam08)
+- **Primary Branch:** `main`
+
+A specialized governance portal prototype engineered for the All India Council for Technical Education (AICTE) to monitor, cross-reference, and track institution-related grievances across AICTE bureaus and cells—specifically highlighting the **Regulation Bureau (RB)** and the **Public Grievance Redressal Cell (PGRC)**.
 
 > **Demonstration Notice:** All data, match scores, SLA thresholds, and resolution metrics in this prototype are simulated and do not represent verified AICTE policy, live records, or official government data.
 
@@ -40,13 +44,20 @@ A governance portal prototype for the All India Council for Technical Education 
 - Node.js v18 or later
 - npm
 
-### 1. Install dependencies
+### 1. Clone repository
+
+```bash
+git clone https://github.com/nooralam08/Abhigyan.git
+cd Abhigyan
+```
+
+### 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Start development server
+### 3. Start development server
 
 ```bash
 npm run dev
@@ -54,7 +65,7 @@ npm run dev
 
 The application will be available at `http://localhost:5173/`
 
-### 3. Production build
+### 4. Production build
 
 ```bash
 npm run build
@@ -62,7 +73,7 @@ npm run build
 
 Output is placed in the `dist/` directory.
 
-### 4. Preview production build
+### 5. Preview production build
 
 ```bash
 npm run preview

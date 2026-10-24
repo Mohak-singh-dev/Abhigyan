@@ -239,7 +239,7 @@ export default function UserManagement() {
         open={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         title="Add AICTE Bureau Officer"
-        subtitle="Provision an authorised case investigator into AICTE CaseTrack"
+        subtitle="Provision an authorised case investigator into Abhigyan"
       >
         <form onSubmit={handleAddOfficer} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">

@@ -444,7 +444,7 @@ export const overlaps: Overlap[] = [
       'Direct causal link between regulatory non-compliance and student grievance',
     ],
     status: 'linked',
-    notes: 'Linked as Case Track #CT-2026-88. Inquiry officer assigned to verify biometric records.',
+    notes: 'Linked as Joint Docket #JD-2026-88. Inquiry officer assigned to verify biometric records.',
   },
   {
     id: 'o3',
@@ -494,7 +494,7 @@ export const initialNotifications: AppNotification[] = [
     id: 'notif-1',
     type: 'alert',
     title: 'High-Risk Overlap Flagged (94% Match)',
-    message: 'AICTE CaseTrack detected overlapping fee complaints for Sunrise Institute of Technology in RB and PGRC.',
+    message: 'Abhigyan detected overlapping fee complaints for Sunrise Institute of Technology in RB and PGRC.',
     timestamp: '2026-10-24 16:30',
     caseId: 'RB-2026-0141',
     read: false,
