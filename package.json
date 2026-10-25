@@ -10,7 +10,12 @@
     "url": "https://github.com/nooralam08/Abhigyan.git"
   },
   "homepage": "https://github.com/nooralam08/Abhigyan#readme",
-  "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "node --test src/api/__tests__/*.test.mjs"
+  },
   "dependencies": {
     "lucide-react": "^0.453.0",
     "react": "^18.3.1",

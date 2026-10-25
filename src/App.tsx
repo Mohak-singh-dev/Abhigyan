@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ShieldAlert } from 'lucide-react'
+import { Landmark, Loader2, ShieldAlert } from 'lucide-react'
 import type { AppNotification, Bureau, CaseDocument, Complaint, Page, ReassignmentRequest, Role, Status, UserProfile } from './types'
 import {
   canAddCaseRemarks,
@@ -16,6 +16,18 @@ import {
   overlaps,
   userProfiles,
 } from './data'
+import {
+  AUTH_TOKEN_KEY,
+  AUTH_USER_KEY,
+  clearAuthToken,
+  getAuthToken,
+  onUnauthorized,
+} from './api/client'
+import {
+  getCurrentUserApi,
+  demoLoginApi,
+  logoutAuth,
+} from './api/auth'
 import AppLayout from './components/layout/AppLayout'
 import Dashboard from './pages/Dashboard'
 import { ComplaintsPage, DetailsPage, SubmitComplaint } from './pages/Complaints'
@@ -72,29 +84,80 @@ const STORAGE_KEYS = {
   COMPLAINTS: 'abhigyan_complaints',
   NOTIFICATIONS: 'abhigyan_notifications',
   USERS: USER_STORAGE_KEY,
+  CURRENT_USER: AUTH_USER_KEY,
+  TOKEN: AUTH_TOKEN_KEY,
 } as const
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEYS.IS_LOGGED_IN)
-      return stored !== null ? JSON.parse(stored) : true
-    } catch {
-      return true
-    }
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(() => {
+    return Boolean(getAuthToken())
   })
 
-  const [currentRole, setCurrentRole] = useState<Role>(() => {
+  const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEYS.ROLE)
-      if (stored && ['Complainant', 'Officer', 'BureauAdmin', 'Admin'].includes(stored)) {
-        return stored as Role
+      const stored = localStorage.getItem(STORAGE_KEYS.CURRENT_USER)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (parsed && typeof parsed === 'object' && parsed.id) return parsed
       }
     } catch {
       // fallback
     }
-    return 'Admin'
+    return userProfiles[0]
   })
+
+  const currentRole: Role =
+    currentUser?.role && ['Complainant', 'Officer', 'BureauAdmin', 'Admin'].includes(currentUser.role)
+      ? (currentUser.role as Role)
+      : 'Admin'
+
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    return Boolean(getAuthToken())
+  })
+
+  // Verify backend session on mount using GET /api/auth/me
+  useEffect(() => {
+    let isMounted = true
+
+    async function verifySession() {
+      const token = getAuthToken()
+      if (!token) {
+        if (isMounted) {
+          setIsLoggedIn(false)
+          setIsAuthLoading(false)
+        }
+        return
+      }
+
+      try {
+        const user = await getCurrentUserApi()
+        if (isMounted) {
+          setCurrentUser(user)
+          setIsLoggedIn(true)
+        }
+      } catch {
+        clearAuthToken()
+        if (isMounted) {
+          setIsLoggedIn(false)
+        }
+      } finally {
+        if (isMounted) {
+          setIsAuthLoading(false)
+        }
+      }
+    }
+
+    verifySession()
+
+    const unsubscribe = onUnauthorized(() => {
+      setIsLoggedIn(false)
+    })
+
+    return () => {
+      isMounted = false
+      unsubscribe()
+    }
+  }, [])
 
   const [activePage, setActivePage] = useState<Page>(() => {
     try {
@@ -253,26 +316,48 @@ export default function App() {
     }
   }, [users])
 
-  // Current active profile based on role
-  const currentUser: UserProfile =
-    users.find((u) => u.role === currentRole) || users[0] || userProfiles[0]
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser))
+    } catch {
+      // ignore
+    }
+  }, [currentUser])
 
-  // Role switching with automatic landing page redirection
-  const handleSelectRole = (newRole: Role) => {
-    setCurrentRole(newRole)
-    const permitted = ROLE_PERMITTED_PAGES[newRole]
-    if (!permitted.includes(activePage)) {
-      setActivePage(getDefaultLandingPage(newRole))
+  // Role switching authenticated via backend demo-login
+  const handleSelectRole = async (newRole: Role) => {
+    try {
+      const res = await demoLoginApi({ role: newRole })
+      setCurrentUser(res.user)
+      const targetRole = res.user.role as Role
+      const permitted = ROLE_PERMITTED_PAGES[targetRole]
+      if (permitted && !permitted.includes(activePage)) {
+        setActivePage(getDefaultLandingPage(targetRole))
+      }
+    } catch {
+      const deniedNotif: AppNotification = {
+        id: `notif-auth-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Role Switch Denied',
+        message: `Failed to authenticate backend session for role '${newRole}'. Permissions cannot be escalated without server verification.`,
+        timestamp: `${TODAY} 11:30`,
+        read: false,
+      }
+      setNotifications((prev) => [deniedNotif, ...prev])
     }
   }
 
-  const handleLogin = (role: Role) => {
-    setCurrentRole(role)
+  const handleLogin = (user: UserProfile) => {
+    setCurrentUser(user)
     setIsLoggedIn(true)
+    const role = (['Complainant', 'Officer', 'BureauAdmin', 'Admin'].includes(user.role)
+      ? user.role
+      : 'Admin') as Role
     setActivePage(getDefaultLandingPage(role))
   }
 
   const handleSignOut = () => {
+    logoutAuth()
     setIsLoggedIn(false)
     try {
       localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, 'false')
@@ -820,6 +905,27 @@ export default function App() {
 
   const handleMarkAllNotificationsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+  }
+
+  // Session verification loader
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-[#0b2250] flex flex-col items-center justify-center text-white font-sans p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 rounded-xl bg-teal-500/20 text-teal-300 border border-teal-400/30 flex items-center justify-center">
+            <Landmark size={26} />
+          </div>
+          <div>
+            <div className="font-bold text-lg tracking-wide uppercase">All India Council for Technical Education</div>
+            <div className="text-xs text-navy-200">Abhigyan Complaint Monitoring Platform</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 text-sm text-teal-300 bg-white/5 border border-white/10 px-5 py-3 rounded-xl">
+          <Loader2 size={18} className="animate-spin text-teal-300" />
+          <span>Verifying secure session with FastAPI backend...</span>
+        </div>
+      </div>
+    )
   }
 
   // If user is logged out, show the Login screen
