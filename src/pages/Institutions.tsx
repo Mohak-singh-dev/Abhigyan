@@ -11,18 +11,26 @@ import {
   Search,
   ShieldAlert,
 } from 'lucide-react'
-import type { Complaint } from '../types'
+import type { Complaint, Role, Status, UserProfile } from '../types'
 import { institutions } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle, SearchBox } from '../components/ui'
 import ComplaintTable from '../components/ComplaintTable'
 
+interface InstitutionsProps {
+  complaints: Complaint[]
+  onOpen: (id: string) => void
+  onStatus?: (id: string, s: Status, note?: string) => void
+  currentRole?: Role
+  currentUser?: UserProfile
+}
+
 export default function Institutions({
   complaints,
   onOpen,
-}: {
-  complaints: Complaint[]
-  onOpen: (id: string) => void
-}) {
+  onStatus,
+  currentRole,
+  currentUser,
+}: InstitutionsProps) {
   const [q, setQ] = useState('')
   const [stateFilter, setStateFilter] = useState('All')
   const [typeFilter, setTypeFilter] = useState('All')
@@ -241,7 +249,9 @@ export default function Institutions({
             <ComplaintTable
               rows={instComplaints}
               onOpen={onOpen}
-              onStatus={() => {}}
+              onStatus={onStatus}
+              currentRole={currentRole}
+              currentUser={currentUser}
             />
           </Card>
         </div>

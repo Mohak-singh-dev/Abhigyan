@@ -1,26 +1,84 @@
 import { useState } from 'react'
 import {
+  AlertCircle,
   Building2,
   CheckCircle2,
   Mail,
   Phone,
-  Plus,
   Search,
   Shield,
   ShieldCheck,
   UserCheck,
   UserPlus,
   Users,
+  X,
 } from 'lucide-react'
 import type { Bureau, Role, UserProfile } from '../types'
-import { BUREAUS, userProfiles as initialProfiles } from '../data'
-import { Badge, Button, Card, CardHeader, Modal, PageTitle, SearchBox } from '../components/ui'
+import { BUREAUS, USER_STORAGE_KEY, userProfiles as initialProfiles } from '../data'
+import { Badge, Button, Card, Modal, PageTitle, SearchBox } from '../components/ui'
 
-export default function UserManagement() {
-  const [users, setUsers] = useState<UserProfile[]>(initialProfiles)
+export { USER_STORAGE_KEY }
+
+export function getStoredUsers(): UserProfile[] {
+  try {
+    const stored = localStorage.getItem(USER_STORAGE_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return initialProfiles
+}
+
+export interface UserManagementProps {
+  currentRole?: Role
+  currentUser?: UserProfile
+  users?: UserProfile[]
+  onUpdateUsers?: React.Dispatch<React.SetStateAction<UserProfile[]>>
+}
+
+export default function UserManagement({
+  currentRole = 'Admin',
+  currentUser,
+  users: externalUsers,
+  onUpdateUsers,
+}: UserManagementProps) {
+  const [internalUsers, setInternalUsers] = useState<UserProfile[]>(() => getStoredUsers())
+  const users = externalUsers ?? internalUsers
+
+  const updateUsers = (updater: (prev: UserProfile[]) => UserProfile[]) => {
+    if (onUpdateUsers) {
+      onUpdateUsers((prev) => {
+        const next = updater(prev)
+        try {
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(next))
+        } catch {
+          // ignore
+        }
+        return next
+      })
+    } else {
+      setInternalUsers((prev) => {
+        const next = updater(prev)
+        try {
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(next))
+        } catch {
+          // ignore
+        }
+        return next
+      })
+    }
+  }
+
   const [search, setSearch] = useState('')
   const [bureauFilter, setBureauFilter] = useState<string>('All')
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [noticeBanner, setNoticeBanner] = useState<string | null>(null)
+  const [errorBanner, setErrorBanner] = useState<string | null>(null)
 
   // New Officer State
   const [newName, setNewName] = useState('')
@@ -29,6 +87,8 @@ export default function UserManagement() {
   const [newBureau, setNewBureau] = useState<Bureau>('PGRC')
   const [newRole, setNewRole] = useState<Role>('Officer')
   const [newPhone, setNewPhone] = useState('')
+
+  const isAdmin = currentRole === 'Admin'
 
   const filtered = users.filter((u) => {
     const text = `${u.name} ${u.email} ${u.designation} ${u.bureau}`.toLowerCase()
@@ -39,9 +99,28 @@ export default function UserManagement() {
 
   const handleAddOfficer = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newName.trim() || !newEmail.trim()) return
+    setNoticeBanner(null)
+    setErrorBanner(null)
+
+    if (!isAdmin) {
+      setErrorBanner('Unauthorized: Only System Administrators can provision new bureau officers.')
+      return
+    }
+
+    if (!newName.trim() || !newEmail.trim()) {
+      setErrorBanner('Please provide both the official name and email address.')
+      return
+    }
+
+    const emailCandidate = newEmail.trim().toLowerCase()
+    const isDuplicate = users.some((u) => u.email.toLowerCase() === emailCandidate)
+    if (isDuplicate) {
+      setErrorBanner(`An officer with official email "${newEmail.trim()}" is already registered in the directory.`)
+      return
+    }
 
     const initials = newName
+      .trim()
       .split(' ')
       .map((n) => n[0])
       .join('')
@@ -50,43 +129,63 @@ export default function UserManagement() {
 
     const created: UserProfile = {
       id: `u-${Date.now()}`,
-      name: newName,
-      email: newEmail,
-      designation: newDesignation || 'Grievance Officer',
+      name: newName.trim(),
+      email: newEmail.trim(),
+      designation: newDesignation.trim() || 'Grievance Officer',
       bureau: newBureau,
       role: newRole,
       avatarText: initials || 'OF',
-      phone: newPhone || '+91 11 2958 0000',
+      phone: newPhone.trim() || '+91 11 2958 0000',
       activeCasesCount: 0,
       status: 'Active',
     }
 
-    setUsers((prev) => [...prev, created])
+    updateUsers((prev) => [...prev, created])
     setNewName('')
     setNewEmail('')
     setNewDesignation('')
     setNewPhone('')
     setIsAddModalOpen(false)
+    setNoticeBanner(
+      `Officer "${created.name}" (${created.bureau} Bureau) successfully provisioned and persisted to ${USER_STORAGE_KEY}.`
+    )
   }
 
   const toggleStatus = (id: string) => {
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === id ? { ...u, status: u.status === 'Active' ? 'On Leave' : 'Active' } : u
-      )
+    setNoticeBanner(null)
+    setErrorBanner(null)
+
+    if (!isAdmin) {
+      setErrorBanner('Unauthorized: Only System Administrators can alter officer duty status.')
+      return
+    }
+
+    const target = users.find((u) => u.id === id)
+    if (!target) return
+
+    const nextStatus = target.status === 'Active' ? 'On Leave' : 'Active'
+    updateUsers((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, status: nextStatus } : u))
     )
+    setNoticeBanner(`Duty status for "${target.name}" changed to ${nextStatus} and saved to ${USER_STORAGE_KEY}.`)
   }
 
   return (
     <div className="space-y-6">
       <PageTitle
-        title="AICTE Personnel &amp; Bureau Officers"
+        title="AICTE Personnel & Bureau Officers"
         sub="Authorised grievance investigators, bureau directors, and case handling officers"
         action={
           <Button
             variant="primary"
             size="sm"
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={() => {
+              if (!isAdmin) {
+                setErrorBanner('Unauthorized: Only System Administrators can provision new bureau officers.')
+                return
+              }
+              setIsAddModalOpen(true)
+            }}
             className="text-xs"
           >
             <UserPlus size={14} />
@@ -94,6 +193,40 @@ export default function UserManagement() {
           </Button>
         }
       />
+
+      {/* Non-blocking Notice Banner */}
+      {noticeBanner && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-xs font-medium text-emerald-900 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
+            <span>{noticeBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNoticeBanner(null)}
+            className="text-emerald-700 hover:text-emerald-900"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Non-blocking Error Banner */}
+      {errorBanner && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-red-300 bg-red-50 p-4 text-xs font-medium text-red-900 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} className="text-red-700 shrink-0" />
+            <span>{errorBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorBanner(null)}
+            className="text-red-700 hover:text-red-900"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Summary KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -224,7 +357,13 @@ export default function UserManagement() {
             <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
               <button
                 onClick={() => toggleStatus(user.id)}
-                className="text-xs text-slate-500 hover:text-navy-800 font-medium"
+                disabled={!isAdmin}
+                title={!isAdmin ? 'Only System Administrators can change duty status' : undefined}
+                className={`text-xs font-medium ${
+                  isAdmin
+                    ? 'text-slate-500 hover:text-navy-800 cursor-pointer'
+                    : 'text-slate-400 cursor-not-allowed opacity-60'
+                }`}
               >
                 Toggle Status ({user.status === 'Active' ? 'Set On Leave' : 'Set Active'})
               </button>

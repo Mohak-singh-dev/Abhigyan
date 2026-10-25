@@ -25,6 +25,7 @@ export interface CaseDocument {
   uploaderRole: Role
   visibility: 'Public' | 'Internal'
   fileType?: string
+  dataUrl?: string
 }
 
 export interface TimelineEvent {
@@ -143,4 +144,15 @@ export interface UserProfile {
   activeCasesCount: number
   status: 'Active' | 'On Leave' | 'Inactive'
   department?: string
+}
+
+export interface AppSettings {
+  similarityThreshold: number
+  slaCritical: number
+  slaHigh: number
+  slaMedium: number
+  autoEscalate: boolean
+  emailAlerts: boolean
+  updatedAt?: string
+  updatedBy?: string
 }

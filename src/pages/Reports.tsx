@@ -26,7 +26,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import type { Complaint } from '../types'
-import { BUREAUS, BUREAU_INFO, STATUSES } from '../data'
+import { BUREAUS, BUREAU_INFO, STATUSES, TODAY, instName } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle } from '../components/ui'
 
 const PALETTE = ['#0b2250', '#1d4a94', '#0d9488', '#f59e0b', '#dc2626', '#8b5cf6', '#64748b']
@@ -39,6 +39,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function Reports({ complaints }: { complaints: Complaint[] }) {
   const [reportPeriod, setReportPeriod] = useState('Current Academic Year (2026-27)')
+  const [downloadSuccess, setDownloadSuccess] = useState(false)
 
   // 1. Complaint Categories data
   const categoryCounts: Record<string, number> = {}
@@ -80,6 +81,63 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
     window.print()
   }
 
+  const handleDownloadDossierCSV = () => {
+    const headers = [
+      'Case ID',
+      'AICTE Permanent ID',
+      'Institution Name',
+      'Bureau / Cell',
+      'Category',
+      'Priority',
+      'Investigating Officer',
+      'Status',
+      'Filing Date',
+      'Statutory SLA Due Date',
+      'Subject Title',
+      'Case Description',
+    ]
+
+    const escapeCsv = (str: string) => {
+      const escaped = (str || '').replace(/"/g, '""')
+      return `"${escaped}"`
+    }
+
+    const rows = complaints.map((c) => [
+      c.id,
+      c.institutionPermanentId || '',
+      instName(c.institutionId),
+      c.bureau,
+      c.category,
+      c.priority,
+      c.officer,
+      c.status,
+      c.date,
+      c.due,
+      c.title,
+      c.description.replace(/[\r\n]+/g, ' '),
+    ])
+
+    const csvContent = [
+      headers.map(escapeCsv).join(','),
+      ...rows.map((row) => row.map(escapeCsv).join(',')),
+    ].join('\r\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `AICTE_Abhigyan_Compliance_Dossier_${TODAY}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    setDownloadSuccess(true)
+    setTimeout(() => {
+      setDownloadSuccess(false)
+    }, 6000)
+  }
+
   return (
     <div className="space-y-6">
       <PageTitle
@@ -89,20 +147,37 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handlePrint} className="text-xs">
               <Printer size={14} />
-              <span>Print Dossier</span>
+              <span>Print Dossier (PDF)</span>
             </Button>
             <Button
               variant="primary"
               size="sm"
-              onClick={() => alert('Compliance Summary PDF successfully exported to downloads folder.')}
+              onClick={handleDownloadDossierCSV}
               className="text-xs"
             >
               <Download size={14} />
-              <span>Download PDF Report</span>
+              <span>Download Dossier (CSV)</span>
             </Button>
           </div>
         }
       />
+
+      {downloadSuccess && (
+        <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
+            <span>
+              Real case data dossier successfully generated and downloaded as <strong>AICTE_Abhigyan_Compliance_Dossier_{TODAY}.csv</strong> ({complaints.length} records). For printable PDF output, use the &quot;Print Dossier (PDF)&quot; feature.
+            </span>
+          </div>
+          <button
+            onClick={() => setDownloadSuccess(false)}
+            className="text-emerald-700 hover:text-emerald-950 font-semibold text-xs ml-4"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Summary KPI Ribbon */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

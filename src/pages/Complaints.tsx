@@ -49,6 +49,7 @@ import {
   getDaysRemaining,
   getInstitution,
   getOfficersForBureau,
+  getSlaDaysForPriority,
   instName,
   institutions,
   isOverdue,
@@ -488,18 +489,24 @@ export function SubmitComplaint({
     const sizeKb = Math.round(file.size / 1024)
     const sizeStr = sizeKb > 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb} KB`
 
-    const newDoc: CaseDocument = {
-      id: `doc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      name: file.name,
-      size: sizeStr,
-      uploadDate: TODAY,
-      uploadedBy: `${complainantName} (${currentRole})`,
-      uploaderRole: currentRole,
-      visibility: currentRole === 'Complainant' ? 'Public' : docVisibility,
-      fileType: file.type || 'application/pdf',
-    }
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string
+      const newDoc: CaseDocument = {
+        id: `doc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: file.name,
+        size: sizeStr,
+        uploadDate: TODAY,
+        uploadedBy: `${complainantName} (${currentRole})`,
+        uploaderRole: currentRole,
+        visibility: currentRole === 'Complainant' ? 'Public' : docVisibility,
+        fileType: file.type || 'application/pdf',
+        dataUrl,
+      }
 
-    setAttachedFiles((prev) => [...prev, newDoc])
+      setAttachedFiles((prev) => [...prev, newDoc])
+    }
+    reader.readAsDataURL(file)
     e.target.value = ''
   }
 
@@ -538,7 +545,7 @@ export function SubmitComplaint({
     const newCaseId = candidateId
 
     // Calculate SLA due date
-    const slaDays = priority === 'Critical' ? 3 : priority === 'High' ? 7 : priority === 'Medium' ? 14 : 21
+    const slaDays = getSlaDaysForPriority(priority)
     const dueDate = new Date()
     dueDate.setDate(dueDate.getDate() + slaDays)
     const dueStr = dueDate.toISOString().slice(0, 10)
@@ -1187,6 +1194,9 @@ export function DetailsPage({
   const [docUploadName, setDocUploadName] = useState('')
   const [docUploadSize, setDocUploadSize] = useState('650 KB')
   const [docUploadVisibility, setDocUploadVisibility] = useState<'Public' | 'Internal'>('Public')
+  const [docUploadDataUrl, setDocUploadDataUrl] = useState<string | undefined>(undefined)
+  const [docUploadFileType, setDocUploadFileType] = useState<string>('application/pdf')
+  const [previewDoc, setPreviewDoc] = useState<CaseDocument | null>(null)
   const [statusRemarkModal, setStatusRemarkModal] = useState<Status | null>(null)
   const [statusRemarkText, setStatusRemarkText] = useState('')
 
@@ -1364,11 +1374,13 @@ export function DetailsPage({
       uploadedBy: `${currentUser?.name || 'Officer'} (${currentRole})`,
       uploaderRole: currentRole,
       visibility: currentRole === 'Complainant' ? 'Public' : docUploadVisibility,
-      fileType: 'application/pdf',
+      fileType: docUploadFileType || 'application/pdf',
+      dataUrl: docUploadDataUrl,
     }
 
     onAddDocument(c.id, newDoc)
     setDocUploadName('')
+    setDocUploadDataUrl(undefined)
     setIsDocModalOpen(false)
   }
 
@@ -1593,12 +1605,30 @@ export function DetailsPage({
                       {doc.visibility === 'Public' ? 'Public / Permitted' : 'Internal Bureau Only'}
                     </span>
                     <button
-                      onClick={() => alert(`Simulated document preview for: ${doc.name}\nSize: ${doc.size}\nVisibility: ${doc.visibility}`)}
-                      className="p-1.5 text-slate-500 hover:text-navy-900 transition"
+                      onClick={() => setPreviewDoc(doc)}
+                      className="p-1.5 text-slate-500 hover:text-navy-900 transition rounded hover:bg-slate-100"
                       title="Preview Document"
                     >
                       <Eye size={15} />
                     </button>
+                    {doc.dataUrl ? (
+                      <a
+                        href={doc.dataUrl}
+                        download={doc.name}
+                        className="p-1.5 text-slate-500 hover:text-navy-900 transition rounded hover:bg-slate-100"
+                        title="Download Document"
+                      >
+                        <Download size={15} />
+                      </a>
+                    ) : (
+                      <button
+                        onClick={() => setPreviewDoc(doc)}
+                        className="p-1.5 text-slate-500 hover:text-navy-900 transition rounded hover:bg-slate-100"
+                        title="View Document Details (Simulated Metadata)"
+                      >
+                        <Download size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2408,6 +2438,31 @@ export function DetailsPage({
             </p>
 
             <div>
+              <label className="block font-semibold text-slate-700 mb-1">Select File (Optional)</label>
+              <input
+                type="file"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) {
+                    setDocUploadName(f.name)
+                    const sizeKb = Math.round(f.size / 1024)
+                    setDocUploadSize(sizeKb > 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb} KB`)
+                    setDocUploadFileType(f.type || 'application/octet-stream')
+                    const reader = new FileReader()
+                    reader.onload = (ev) => {
+                      setDocUploadDataUrl(ev.target?.result as string)
+                    }
+                    reader.readAsDataURL(f)
+                  }
+                }}
+                className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-navy-50 file:text-navy-700 hover:file:bg-navy-100"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                Supports PDF, JPG, PNG, DOCX up to 10 MB. Files are stored in browser memory for local preview.
+              </span>
+            </div>
+
+            <div>
               <label className="block font-semibold text-slate-700 mb-1">Document Title *</label>
               <input
                 type="text"
@@ -2421,7 +2476,7 @@ export function DetailsPage({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Simulated Size</label>
+                <label className="block font-semibold text-slate-700 mb-1">Document Size</label>
                 <input
                   type="text"
                   value={docUploadSize}
@@ -2447,7 +2502,7 @@ export function DetailsPage({
             </div>
 
             <div className="rounded-lg bg-slate-50 p-3 text-[11px] text-slate-500 border border-slate-200">
-              Files uploaded in this demo are processed in local session memory. Real storage with S3/GCS will be wired via FastAPI.
+              Files uploaded in this demo are processed in local session memory. Cloud object storage (S3/GCS) with virus scanning will be connected via FastAPI.
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -2465,6 +2520,109 @@ export function DetailsPage({
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Document Preview / Download Modal */}
+      {previewDoc && (
+        <Modal
+          open={!!previewDoc}
+          onClose={() => setPreviewDoc(null)}
+          title={`Document Record: ${previewDoc.name}`}
+        >
+          <div className="space-y-4 text-xs">
+            {previewDoc.dataUrl ? (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-slate-50 p-3 border border-slate-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-slate-900">{previewDoc.name}</div>
+                      <div className="text-[11px] text-slate-500">
+                        Size: {previewDoc.size} • Uploaded {fmt(previewDoc.uploadDate)} by {previewDoc.uploadedBy}
+                      </div>
+                    </div>
+                    <a
+                      href={previewDoc.dataUrl}
+                      download={previewDoc.name}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-navy-800 text-white font-semibold text-xs hover:bg-navy-900 transition shadow-2xs"
+                    >
+                      <Download size={13} />
+                      <span>Download File</span>
+                    </a>
+                  </div>
+                </div>
+
+                {previewDoc.fileType?.startsWith('image/') ||
+                previewDoc.name.match(/\.(jpeg|jpg|png|webp|gif)$/i) ? (
+                  <div className="rounded-lg border border-slate-200 p-2 bg-slate-100 text-center">
+                    <img
+                      src={previewDoc.dataUrl}
+                      alt={previewDoc.name}
+                      className="max-h-80 max-w-full rounded mx-auto object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 p-3 bg-slate-50 text-slate-700">
+                    <p className="mb-2 text-slate-600">Document preview loaded from session memory:</p>
+                    <iframe
+                      src={previewDoc.dataUrl}
+                      title={previewDoc.name}
+                      className="w-full h-64 rounded border border-slate-200 bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-amber-900">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-lg bg-amber-100 p-2 text-amber-800 shrink-0">
+                      <FileText size={20} />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm">Demonstration Metadata Record</h4>
+                      <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                        This exhibit is simulated demonstration metadata (<strong>{previewDoc.name}</strong>, {previewDoc.size}, uploaded by {previewDoc.uploadedBy}). No actual binary payload was linked to this initial mock record.
+                      </p>
+                      <p className="text-[11px] text-amber-700 mt-2 font-medium">
+                        Actual file downloading and binary streaming require cloud object storage (e.g. S3 or GCS bucket), which will be connected via the FastAPI backend.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5 text-slate-600">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">File Name:</span>
+                    <span className="font-semibold text-slate-800">{previewDoc.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Recorded Size:</span>
+                    <span className="font-mono text-slate-700">{previewDoc.size}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Upload Date:</span>
+                    <span className="text-slate-700">{fmt(previewDoc.uploadDate)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Classification:</span>
+                    <span className="font-semibold text-slate-700">{previewDoc.visibility} Visibility</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPreviewDoc(null)}
+              >
+                Close Viewer
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
 

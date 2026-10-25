@@ -20,16 +20,30 @@ import type { Complaint, Overlap, Role, UserProfile } from '../types'
 import { TODAY, fmt, instName, overlaps as initialOverlaps } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle } from '../components/ui'
 
-const OVERLAP_STORAGE_KEYS = {
+export const OVERLAP_STORAGE_KEYS = {
   STATES: 'abhigyan_overlap_states',
   NOTES: 'abhigyan_overlap_notes',
 } as const
+
+export type OverlapReviewState = 'linked' | 'dismissed' | 'deferred'
+
+export const DEFAULT_OVERLAP_STATES: Record<string, OverlapReviewState> = {
+  o2: 'linked',
+  o4: 'linked',
+  o5: 'dismissed',
+}
 
 interface OverlapsProps {
   complaints: Complaint[]
   onOpen: (id: string) => void
   currentRole?: Role
   currentUser?: UserProfile
+  overlapStates?: Record<string, OverlapReviewState>
+  onUpdateOverlapState?: (
+    id: string,
+    state: OverlapReviewState | null,
+    note?: string
+  ) => void
 }
 
 export default function Overlaps({
@@ -37,9 +51,11 @@ export default function Overlaps({
   onOpen,
   currentRole = 'Admin',
   currentUser,
+  overlapStates: propOverlapStates,
+  onUpdateOverlapState,
 }: OverlapsProps) {
-  const [overlapStates, setOverlapStates] = useState<
-    Record<string, 'linked' | 'dismissed' | 'deferred'>
+  const [internalStates, setInternalStates] = useState<
+    Record<string, OverlapReviewState>
   >(() => {
     try {
       const stored = localStorage.getItem(OVERLAP_STORAGE_KEYS.STATES)
@@ -49,12 +65,10 @@ export default function Overlaps({
     } catch {
       // fallback
     }
-    return {
-      o2: 'linked',
-      o4: 'linked',
-      o5: 'dismissed',
-    }
+    return DEFAULT_OVERLAP_STATES
   })
+
+  const overlapStates = propOverlapStates || internalStates
 
   const [overlapNotes, setOverlapNotes] = useState<Record<string, string>>(() => {
     try {
@@ -90,26 +104,42 @@ export default function Overlaps({
 
   // Explicit human-in-the-loop actions
   const handleConfirm = (id: string, note?: string) => {
-    setOverlapStates((prev) => ({ ...prev, [id]: 'linked' }))
+    if (onUpdateOverlapState) {
+      onUpdateOverlapState(id, 'linked', note)
+    } else {
+      setInternalStates((prev) => ({ ...prev, [id]: 'linked' }))
+    }
     if (note) {
       setOverlapNotes((prev) => ({ ...prev, [id]: note }))
     }
   }
 
   const handleReject = (id: string) => {
-    setOverlapStates((prev) => ({ ...prev, [id]: 'dismissed' }))
+    if (onUpdateOverlapState) {
+      onUpdateOverlapState(id, 'dismissed')
+    } else {
+      setInternalStates((prev) => ({ ...prev, [id]: 'dismissed' }))
+    }
   }
 
   const handleDefer = (id: string) => {
-    setOverlapStates((prev) => ({ ...prev, [id]: 'deferred' }))
+    if (onUpdateOverlapState) {
+      onUpdateOverlapState(id, 'deferred')
+    } else {
+      setInternalStates((prev) => ({ ...prev, [id]: 'deferred' }))
+    }
   }
 
   const handleReset = (id: string) => {
-    setOverlapStates((prev) => {
-      const copy = { ...prev }
-      delete copy[id]
-      return copy
-    })
+    if (onUpdateOverlapState) {
+      onUpdateOverlapState(id, null)
+    } else {
+      setInternalStates((prev) => {
+        const copy = { ...prev }
+        delete copy[id]
+        return copy
+      })
+    }
   }
 
   const activeList = initialOverlaps.filter((o) => {

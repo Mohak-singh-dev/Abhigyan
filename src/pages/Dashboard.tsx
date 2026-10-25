@@ -34,6 +34,7 @@ import {
 } from 'recharts'
 import type { Complaint, Page, Role, Status, UserProfile } from '../types'
 import { BUREAUS, BUREAU_INFO, CURRENT_OFFICER, TODAY, isOverdue, overlaps } from '../data'
+import { DEFAULT_OVERLAP_STATES, OVERLAP_STORAGE_KEYS } from './Overlaps'
 import { Button, Card, CardHeader, PageTitle, Stat } from '../components/ui'
 import ComplaintTable from '../components/ComplaintTable'
 
@@ -44,6 +45,7 @@ interface DashboardProps {
   onNavigate: (page: Page) => void
   currentRole: Role
   currentUser?: UserProfile
+  pendingOverlapsCount?: number
 }
 
 export default function Dashboard({
@@ -53,6 +55,7 @@ export default function Dashboard({
   onNavigate,
   currentRole,
   currentUser,
+  pendingOverlapsCount,
 }: DashboardProps) {
   const [bureauFilter, setBureauFilter] = useState<string>('All')
 
@@ -66,7 +69,18 @@ export default function Dashboard({
   const criticalHighCases = complaints.filter(
     (c) => c.priority === 'Critical' || c.priority === 'High'
   ).length
-  const pendingOverlaps = overlaps.filter((o) => o.similarity >= 80).length
+  const pendingOverlaps =
+    pendingOverlapsCount !== undefined
+      ? pendingOverlapsCount
+      : (() => {
+          try {
+            const stored = localStorage.getItem(OVERLAP_STORAGE_KEYS.STATES)
+            const states = stored ? JSON.parse(stored) : DEFAULT_OVERLAP_STATES
+            return overlaps.filter((o) => !states[o.id]).length
+          } catch {
+            return overlaps.filter((o) => !DEFAULT_OVERLAP_STATES[o.id]).length
+          }
+        })()
   const resolutionRate = Math.round((resolvedCases / totalCases) * 100) || 0
 
   // Filtered recent cases
@@ -288,8 +302,10 @@ export default function Dashboard({
             <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
               Monitoring duplicate grievances filed across{' '}
               <strong className="text-indigo-800">Regulation Bureau (RB)</strong> and{' '}
-              <strong className="text-teal-800">Public Grievance Redressal Cell (PGRC)</strong>. 5 potential overlaps
-              identified with matching confidence scores up to 94% (demonstration logic based on keyword and institution matching).
+              <strong className="text-teal-800">Public Grievance Redressal Cell (PGRC)</strong>.{' '}
+              {pendingOverlaps > 0
+                ? `${pendingOverlaps} unreviewed ${pendingOverlaps === 1 ? 'overlap' : 'overlaps'} awaiting officer action with matching confidence scores up to 94% (demonstration logic based on keyword and institution matching).`
+                : 'All detected cross-bureau overlap records have been reviewed and processed.'}
             </p>
           </div>
           <Button
@@ -298,7 +314,7 @@ export default function Dashboard({
             onClick={() => onNavigate('overlaps')}
             className="text-xs flex items-center gap-1.5"
           >
-            <span>Review Overlaps (5)</span>
+            <span>Review Overlaps ({pendingOverlaps})</span>
             <ArrowRight size={13} />
           </Button>
         </div>

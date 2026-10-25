@@ -1,31 +1,122 @@
 import { useState } from 'react'
 import {
+  AlertCircle,
   Bell,
   CheckCircle2,
   Database,
   Globe,
   Lock,
+  RotateCcw,
   Save,
   Shield,
   Sliders,
   Sparkles,
   Users,
 } from 'lucide-react'
+import type { AppSettings, Role, UserProfile } from '../types'
+import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY, TODAY, getAppSettings } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle } from '../components/ui'
 
-export default function Settings() {
-  const [similarityThreshold, setSimilarityThreshold] = useState(75)
-  const [slaCritical, setSlaCritical] = useState(3)
-  const [slaHigh, setSlaHigh] = useState(7)
-  const [slaMedium, setSlaMedium] = useState(14)
-  const [autoEscalate, setAutoEscalate] = useState(true)
-  const [emailAlerts, setEmailAlerts] = useState(true)
-  const [savedBanner, setSavedBanner] = useState(false)
+interface SettingsProps {
+  currentRole?: Role
+  currentUser?: UserProfile
+}
+
+export default function Settings({ currentRole = 'Admin', currentUser }: SettingsProps) {
+  const [initialSettings] = useState<AppSettings>(() => getAppSettings())
+  const [similarityThreshold, setSimilarityThreshold] = useState(initialSettings.similarityThreshold)
+  const [slaCritical, setSlaCritical] = useState(initialSettings.slaCritical)
+  const [slaHigh, setSlaHigh] = useState(initialSettings.slaHigh)
+  const [slaMedium, setSlaMedium] = useState(initialSettings.slaMedium)
+  const [autoEscalate, setAutoEscalate] = useState(initialSettings.autoEscalate)
+  const [emailAlerts, setEmailAlerts] = useState(initialSettings.emailAlerts)
+  const [savedBanner, setSavedBanner] = useState<string | null>(null)
+  const [errorBanner, setErrorBanner] = useState<string | null>(null)
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault()
-    setSavedBanner(true)
-    setTimeout(() => setSavedBanner(false), 4000)
+    setErrorBanner(null)
+    setSavedBanner(null)
+
+    if (currentRole !== 'Admin') {
+      setErrorBanner('Unauthorized: System and SLA configuration can only be modified by a System Administrator.')
+      return
+    }
+
+    // Input validations
+    if (isNaN(similarityThreshold) || similarityThreshold < 50 || similarityThreshold > 95) {
+      setErrorBanner('Invalid threshold: Overlap similarity threshold must be an integer between 50% and 95%.')
+      return
+    }
+
+    if (isNaN(slaCritical) || slaCritical < 1 || slaCritical > 30) {
+      setErrorBanner('Invalid Critical SLA: Must be a positive business duration between 1 and 30 days.')
+      return
+    }
+
+    if (isNaN(slaHigh) || slaHigh < 1 || slaHigh > 60) {
+      setErrorBanner('Invalid High SLA: Must be a positive business duration between 1 and 60 days.')
+      return
+    }
+
+    if (isNaN(slaMedium) || slaMedium < 1 || slaMedium > 90) {
+      setErrorBanner('Invalid Standard SLA: Must be a positive business duration between 1 and 90 days.')
+      return
+    }
+
+    if (slaCritical >= slaHigh) {
+      setErrorBanner('SLA Logic Conflict: Critical severity SLA window must be shorter than High priority window.')
+      return
+    }
+
+    if (slaHigh >= slaMedium) {
+      setErrorBanner('SLA Logic Conflict: High priority SLA window must be shorter than Standard / Medium window.')
+      return
+    }
+
+    const updatedSettings: AppSettings = {
+      similarityThreshold,
+      slaCritical,
+      slaHigh,
+      slaMedium,
+      autoEscalate,
+      emailAlerts,
+      updatedAt: `${TODAY} 12:00`,
+      updatedBy: currentUser?.name || 'System Admin',
+    }
+
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updatedSettings))
+      setSavedBanner(
+        `Configuration successfully persisted to ${SETTINGS_STORAGE_KEY}. Configured SLA windows (Critical: ${slaCritical}d, High: ${slaHigh}d, Medium: ${slaMedium}d) and overlap threshold (${similarityThreshold}%) are now active for new complaint filings.`
+      )
+      setTimeout(() => setSavedBanner(null), 7000)
+    } catch {
+      setErrorBanner('Storage Error: Unable to save preferences to browser localStorage.')
+    }
+  }
+
+  const handleResetDefaults = () => {
+    setErrorBanner(null)
+    if (currentRole !== 'Admin') {
+      setErrorBanner('Unauthorized: System configuration can only be modified by a System Administrator.')
+      return
+    }
+
+    setSimilarityThreshold(DEFAULT_SETTINGS.similarityThreshold)
+    setSlaCritical(DEFAULT_SETTINGS.slaCritical)
+    setSlaHigh(DEFAULT_SETTINGS.slaHigh)
+    setSlaMedium(DEFAULT_SETTINGS.slaMedium)
+    setAutoEscalate(DEFAULT_SETTINGS.autoEscalate)
+    setEmailAlerts(DEFAULT_SETTINGS.emailAlerts)
+
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(DEFAULT_SETTINGS))
+      setSavedBanner('Configuration successfully reset to demonstration default parameters.')
+      setTimeout(() => setSavedBanner(null), 5000)
+    } catch {
+      setErrorBanner('Storage Error: Unable to reset configuration.')
+    }
   }
 
   return (
@@ -35,10 +126,35 @@ export default function Settings() {
         sub="Configure cross-bureau overlap detection thresholds, statutory SLA rules, and alert mechanisms"
       />
 
+      {errorBanner && (
+        <div className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs font-semibold text-rose-800 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} className="text-rose-600 shrink-0" />
+            <span>{errorBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorBanner(null)}
+            className="text-rose-600 hover:text-rose-800 text-xs font-bold ml-3"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {savedBanner && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 shadow-2xs animate-in fade-in">
-          <CheckCircle2 size={16} className="text-emerald-600" />
-          <span>Configuration successfully updated in local Abhigyan environment!</span>
+        <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <span>{savedBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSavedBanner(null)}
+            className="text-emerald-600 hover:text-emerald-800 text-xs font-bold ml-3"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -89,8 +205,9 @@ export default function Settings() {
         {/* SLA Window Configuration */}
         <Card>
           <CardHeader
-            title="Statutory Redressal SLA Windows (Business Days)"
-            sub="Prescribed timeframes under the AICTE Grievance Redressal Regulations"
+            title="Statutory Redressal SLA Windows (Configurable Demo Parameters)"
+            sub="Configurable business day windows stored in abhigyan_settings. New complaint filings calculate statutory SLA due dates from these values without altering existing case records."
+            action={<Badge v="Configurable" />}
           />
 
           <div className="grid gap-4 sm:grid-cols-3">
@@ -181,9 +298,25 @@ export default function Settings() {
           </div>
         </Card>
 
-        {/* Save button */}
-        <div className="flex justify-end gap-3 pt-2">
-          <Button type="submit" variant="primary" size="md">
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="md"
+            onClick={handleResetDefaults}
+            disabled={currentRole !== 'Admin'}
+          >
+            <RotateCcw size={15} />
+            <span>Reset Demo Defaults</span>
+          </Button>
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled={currentRole !== 'Admin'}
+          >
             <Save size={15} />
             <span>Save Configuration Preferences</span>
           </Button>

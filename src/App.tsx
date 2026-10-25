@@ -20,11 +20,11 @@ import AppLayout from './components/layout/AppLayout'
 import Dashboard from './pages/Dashboard'
 import { ComplaintsPage, DetailsPage, SubmitComplaint } from './pages/Complaints'
 import Institutions from './pages/Institutions'
-import Overlaps from './pages/Overlaps'
+import Overlaps, { DEFAULT_OVERLAP_STATES, OVERLAP_STORAGE_KEYS, type OverlapReviewState } from './pages/Overlaps'
 import CaseTracking from './pages/CaseTracking'
 import Reports from './pages/Reports'
 import NotificationsPage from './pages/Notifications'
-import UserManagement from './pages/UserManagement'
+import UserManagement, { USER_STORAGE_KEY, getStoredUsers } from './pages/UserManagement'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import { Button, Card } from './components/ui'
@@ -71,6 +71,7 @@ const STORAGE_KEYS = {
   CASE_ID: 'abhigyan_selected_case_id',
   COMPLAINTS: 'abhigyan_complaints',
   NOTIFICATIONS: 'abhigyan_notifications',
+  USERS: USER_STORAGE_KEY,
 } as const
 
 export default function App() {
@@ -152,6 +153,37 @@ export default function App() {
     return initialNotifications
   })
 
+  const [overlapStates, setOverlapStates] = useState<Record<string, OverlapReviewState>>(() => {
+    try {
+      const stored = localStorage.getItem(OVERLAP_STORAGE_KEYS.STATES)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (parsed && typeof parsed === 'object') return parsed
+      }
+    } catch {
+      // fallback
+    }
+    return DEFAULT_OVERLAP_STATES
+  })
+
+  const [users, setUsers] = useState<UserProfile[]>(() => getStoredUsers())
+
+  const handleUpdateOverlapState = (
+    id: string,
+    state: OverlapReviewState | null,
+    note?: string
+  ) => {
+    setOverlapStates((prev) => {
+      const updated = { ...prev }
+      if (state === null) {
+        delete updated[id]
+      } else {
+        updated[id] = state
+      }
+      return updated
+    })
+  }
+
   // Synchronize state changes to localStorage
   useEffect(() => {
     try {
@@ -205,9 +237,25 @@ export default function App() {
     }
   }, [notifications])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(OVERLAP_STORAGE_KEYS.STATES, JSON.stringify(overlapStates))
+    } catch {
+      // ignore
+    }
+  }, [overlapStates])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users))
+    } catch {
+      // ignore
+    }
+  }, [users])
+
   // Current active profile based on role
   const currentUser: UserProfile =
-    userProfiles.find((u) => u.role === currentRole) || userProfiles[0]
+    users.find((u) => u.role === currentRole) || users[0] || userProfiles[0]
 
   // Role switching with automatic landing page redirection
   const handleSelectRole = (newRole: Role) => {
@@ -780,7 +828,7 @@ export default function App() {
   }
 
   const selectedComplaint = complaints.find((c) => c.id === selectedCaseId)
-  const pendingOverlapsCount = overlaps.filter((o) => o.similarity >= 80).length
+  const pendingOverlapsCount = overlaps.filter((o) => !overlapStates[o.id]).length
   const isPagePermitted = ROLE_PERMITTED_PAGES[currentRole].includes(activePage)
 
   return (
@@ -830,6 +878,7 @@ export default function App() {
               onNavigate={setActivePage}
               currentRole={currentRole}
               currentUser={currentUser}
+              pendingOverlapsCount={pendingOverlapsCount}
             />
           )}
 
@@ -876,7 +925,13 @@ export default function App() {
           )}
 
           {activePage === 'institutions' && (
-            <Institutions complaints={complaints} onOpen={handleOpenCase} />
+            <Institutions
+              complaints={complaints}
+              onOpen={handleOpenCase}
+              onStatus={handleStatusChange}
+              currentRole={currentRole}
+              currentUser={currentUser}
+            />
           )}
 
           {activePage === 'overlaps' && (
@@ -885,6 +940,8 @@ export default function App() {
               onOpen={handleOpenCase}
               currentRole={currentRole}
               currentUser={currentUser}
+              overlapStates={overlapStates}
+              onUpdateOverlapState={handleUpdateOverlapState}
             />
           )}
 
@@ -910,9 +967,18 @@ export default function App() {
             />
           )}
 
-          {activePage === 'users' && <UserManagement />}
+          {activePage === 'users' && (
+            <UserManagement
+              users={users}
+              onUpdateUsers={setUsers}
+              currentRole={currentRole}
+              currentUser={currentUser}
+            />
+          )}
 
-          {activePage === 'settings' && <Settings />}
+          {activePage === 'settings' && (
+            <Settings currentRole={currentRole} currentUser={currentUser} />
+          )}
         </>
       )}
     </AppLayout>

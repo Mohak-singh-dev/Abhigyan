@@ -6,6 +6,7 @@ import type {
   Priority,
   Status,
   AppNotification,
+  AppSettings,
   UserProfile,
 } from './types'
 
@@ -761,6 +762,48 @@ export const getDaysRemaining = (due: string) => {
   return diffDays
 }
 
+// Storage keys for settings and users
+export const SETTINGS_STORAGE_KEY = 'abhigyan_settings'
+export const USER_STORAGE_KEY = 'abhigyan_users'
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  similarityThreshold: 75,
+  slaCritical: 3,
+  slaHigh: 7,
+  slaMedium: 14,
+  autoEscalate: true,
+  emailAlerts: true,
+}
+
+export const getAppSettings = (): AppSettings => {
+  try {
+    const stored = localStorage.getItem(SETTINGS_STORAGE_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+      }
+    }
+  } catch {}
+  return DEFAULT_SETTINGS
+}
+
+export const getSlaDaysForPriority = (priority: Priority, customSettings?: AppSettings): number => {
+  const cfg = customSettings || getAppSettings()
+  switch (priority) {
+    case 'Critical':
+      return Math.max(1, cfg.slaCritical)
+    case 'High':
+      return Math.max(1, cfg.slaHigh)
+    case 'Medium':
+      return Math.max(1, cfg.slaMedium)
+    case 'Low':
+    default:
+      return Math.max(cfg.slaMedium + 7, 21)
+  }
+}
+
 // Bureau Officer Rosters
 export const BUREAU_OFFICERS: Record<Bureau, string[]> = {
   RB: ['Anita Verma', 'Meera Iyer'],
@@ -772,8 +815,22 @@ export const BUREAU_OFFICERS: Record<Bureau, string[]> = {
 }
 
 export const getOfficersForBureau = (bureau: Bureau | 'All'): string[] => {
-  if (bureau === 'All') return OFFICERS
-  return BUREAU_OFFICERS[bureau] || OFFICERS
+  let customOfficers: string[] = []
+  try {
+    const stored = localStorage.getItem(USER_STORAGE_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        customOfficers = parsed
+          .filter((u: UserProfile) => u.status !== 'On Leave')
+          .filter((u: UserProfile) => bureau === 'All' || u.bureau === bureau)
+          .map((u: UserProfile) => u.name)
+      }
+    }
+  } catch {}
+
+  const base = bureau === 'All' ? OFFICERS : (BUREAU_OFFICERS[bureau] || OFFICERS)
+  return Array.from(new Set([...base, ...customOfficers]))
 }
 
 // Permitted status transitions per workflow rules
