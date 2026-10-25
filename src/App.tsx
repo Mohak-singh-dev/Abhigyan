@@ -214,6 +214,23 @@ export default function App() {
     }
   })
 
+  const [selectedInstitutionId, setSelectedInstitutionId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('abhigyan_selected_institution_id') || 'i1'
+    } catch {
+      return 'i1'
+    }
+  })
+
+  const handleSelectInstitution = (id: string) => {
+    setSelectedInstitutionId(id)
+    try {
+      localStorage.setItem('abhigyan_selected_institution_id', id)
+    } catch {
+      // ignore
+    }
+  }
+
   const [complaints, setComplaints] = useState<Complaint[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.COMPLAINTS)
@@ -1200,6 +1217,7 @@ export default function App() {
               onAddNote={handleAddTimelineNote}
               onAddDocument={handleAddDocument}
               onNavigateToInstitution={(instId) => {
+                handleSelectInstitution(instId)
                 setActivePage('institutions')
               }}
               currentRole={currentRole}
@@ -1214,6 +1232,9 @@ export default function App() {
               onStatus={handleStatusChange}
               currentRole={currentRole}
               currentUser={currentUser}
+              selectedInstitutionId={selectedInstitutionId}
+              onSelectInstitution={handleSelectInstitution}
+              onNavigateToOverlaps={() => setActivePage('overlaps')}
             />
           )}
 

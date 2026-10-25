@@ -577,6 +577,33 @@ export const overlaps: Overlap[] = [
     status: 'dismissed',
     notes: 'Different bureaus and unrelated topics; kept as separate case files.',
   },
+  {
+    id: 'o6',
+    a: 'AB-2026-0310',
+    b: 'RB-2026-0166',
+    similarity: 74,
+    reasons: [
+      'Same Institution: Vidya Polytechnic Institute (Jaipur)',
+      'Approval scrutiny and Regulation Bureau complaint both cite physical campus infrastructure deficiencies',
+      'Filings occurred within 55 calendar days of each other',
+      'Corroborates campus-wide physical infrastructure deficit',
+    ],
+    status: 'pending',
+    notes: 'Moderate overlap: Recommend cross-bureau inspection sharing between Approval Bureau and Regulation Bureau.',
+  },
+  {
+    id: 'o7',
+    a: 'PGRC-2026-0930',
+    b: 'RB-2026-0152',
+    similarity: 34,
+    reasons: [
+      'Same Institution: Bharat College of Engineering (Lucknow)',
+      'Distinct subject matter: Hostel anti-ragging squad inaction vs Computer Science faculty roster vacancies',
+      'Different departments, timelines, and reporting stakeholders',
+    ],
+    status: 'dismissed',
+    notes: 'Independent incidents with unrelated fact patterns. Kept strictly separate.',
+  },
 ]
 
 export const initialNotifications: AppNotification[] = [
