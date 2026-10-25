@@ -198,10 +198,35 @@ SAMPLE_COMPLAINT_RB_IN_PROGRESS = Complaint(
     updated_at=datetime(2026, 10, 1, 10, 0, 0),
 )
 
+SAMPLE_COMPLAINT_PGRC_UNASSIGNED = Complaint(
+    id="PGRC-2026-0999",
+    institution_id="i1",
+    institution_permanent_id="1-4821039",
+    bureau="PGRC",
+    category="Fee Regulation",
+    priority="Medium",
+    officer="Unassigned",
+    assigned_user_id=None,
+    status="Pending",
+    date="2026-10-05",
+    due="2026-11-05",
+    title="Unassigned PGRC complaint",
+    description="Complaint in PGRC bureau that is not assigned to Rajesh Kumar",
+    complainant_type="Student",
+    complainant_name="Another Student",
+    complainant_email="another@student.edu.in",
+    remarks=None,
+    next_action="Jurisdiction verification",
+    last_action_date="2026-10-05",
+    created_at=datetime(2026, 10, 5, 10, 0, 0),
+    updated_at=datetime(2026, 10, 5, 10, 0, 0),
+)
+
 ALL_SAMPLE_COMPLAINTS = [
     SAMPLE_COMPLAINT_PGRC,
     SAMPLE_COMPLAINT_RB,
     SAMPLE_COMPLAINT_RB_IN_PROGRESS,
+    SAMPLE_COMPLAINT_PGRC_UNASSIGNED,
 ]
 
 class MockAuthDBSession:
@@ -318,6 +343,10 @@ class MockAuthDBSession:
 
     def add(self, item):
         if isinstance(item, ComplaintTimeline):
+            if not getattr(item, "id", None):
+                item.id = len(self.timelines) + 1
+            if not getattr(item, "created_at", None):
+                item.created_at = datetime.now(timezone.utc)
             self.timelines.append(item)
         elif isinstance(item, Complaint):
             self.complaints.append(item)
@@ -636,3 +665,112 @@ def test_timeline_actor_integrity_cannot_be_spoofed(client: TestClient, auth_moc
     assert latest_event.role == USER_OFFICER_PGRC.role
     assert "Dr. Mehta" not in latest_event.by
     assert latest_event.role != "Admin"
+
+def test_officer_cannot_view_or_update_unassigned_same_bureau_case(client: TestClient, auth_mock_db):
+    """
+    Regression Test: An Officer cannot view, update status, or add remarks to an unassigned case,
+    even if the case belongs to the Officer's own Bureau (PGRC).
+    """
+    app.dependency_overrides[get_current_user] = lambda: USER_OFFICER_PGRC
+    unassigned_id = SAMPLE_COMPLAINT_PGRC_UNASSIGNED.id
+
+    # 1. View attempt
+    view_res = client.get(f"/api/complaints/{unassigned_id}")
+    assert view_res.status_code == 403
+    assert "neither assigned" in view_res.json()["detail"]
+
+    # 2. Status update attempt
+    status_res = client.patch(f"/api/complaints/{unassigned_id}/status", json={"status": "In Progress"})
+    assert status_res.status_code == 403
+    assert "neither assigned" in status_res.json()["detail"]
+
+    # 3. Add timeline note attempt
+    timeline_res = client.post(f"/api/complaints/{unassigned_id}/timeline", json={"note": "Unauthorized note"})
+    assert timeline_res.status_code == 403
+    assert "neither assigned" in timeline_res.json()["detail"]
+
+def test_officer_can_view_and_add_timeline_on_assigned_case(client: TestClient, auth_mock_db):
+    """
+    Regression Test: An Officer can access and add timeline notes to their explicitly assigned case.
+    """
+    app.dependency_overrides[get_current_user] = lambda: USER_OFFICER_PGRC
+    assigned_id = SAMPLE_COMPLAINT_PGRC.id
+
+    # 1. View succeeds
+    view_res = client.get(f"/api/complaints/{assigned_id}")
+    assert view_res.status_code == 200
+    assert view_res.json()["id"] == assigned_id
+
+    # 2. Timeline note succeeds
+    timeline_res = client.post(f"/api/complaints/{assigned_id}/timeline", json={"note": "Officer verification in progress."})
+    assert timeline_res.status_code == 201
+    data = timeline_res.json()
+    assert data["complaintId"] == assigned_id
+    assert "Rajesh Kumar" in data["by"]
+    assert data["note"] == "Officer verification in progress."
+
+def test_complainant_can_add_timeline_on_own_case_but_not_others(client: TestClient, auth_mock_db):
+    """
+    Regression Test: A Complainant can add supplementary remarks to their own case,
+    but is strictly forbidden (403) from accessing or mutating another complainant's docket.
+    """
+    app.dependency_overrides[get_current_user] = lambda: USER_COMPLAINANT
+    own_id = SAMPLE_COMPLAINT_PGRC.id
+    other_id = SAMPLE_COMPLAINT_RB.id
+
+    # 1. Own case timeline note succeeds
+    own_res = client.post(f"/api/complaints/{own_id}/timeline", json={"note": "Submitted additional fee receipts."})
+    assert own_res.status_code == 201
+    assert own_res.json()["complaintId"] == own_id
+    assert "Rohit Sharma" in own_res.json()["by"]
+
+    # 2. Other case timeline note is denied (403)
+    other_res = client.post(f"/api/complaints/{other_id}/timeline", json={"note": "Unauthorized intruder note."})
+    assert other_res.status_code == 403
+    assert "Complainants are only authorized to access complaints submitted by themselves" in other_res.json()["detail"]
+
+def test_explicit_demo_login_allowed_in_development(client: TestClient, auth_mock_db):
+    """
+    Test explicit demo login succeeds in permitted development configuration.
+    """
+    orig_demo = settings.DEMO_AUTH_ENABLED
+    orig_env = settings.ENVIRONMENT
+    settings.DEMO_AUTH_ENABLED = True
+    settings.ENVIRONMENT = "development"
+    try:
+        response = client.post("/api/auth/demo-login", json={"role": "Officer"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user"]["role"] == "Officer"
+        assert data["user"]["name"] == "Rajesh Kumar"
+        assert data["accessToken"] is not None
+    finally:
+        settings.DEMO_AUTH_ENABLED = orig_demo
+        settings.ENVIRONMENT = orig_env
+
+def test_demo_login_rejected_when_disabled_or_production(client: TestClient, auth_mock_db):
+    """
+    Regression Test: POST /api/auth/demo-login is strictly rejected (403 Forbidden)
+    when DEMO_AUTH_ENABLED is False or ENVIRONMENT is production.
+    """
+    orig_demo = settings.DEMO_AUTH_ENABLED
+    orig_env = settings.ENVIRONMENT
+    try:
+        # Case 1: DEMO_AUTH_ENABLED = False
+        settings.DEMO_AUTH_ENABLED = False
+        settings.ENVIRONMENT = "development"
+        res1 = client.post("/api/auth/demo-login", json={"role": "Admin"})
+        assert res1.status_code == 403
+        assert "Demo authentication is disabled" in res1.json()["detail"]
+
+        # Case 2: ENVIRONMENT = "production"
+        settings.DEMO_AUTH_ENABLED = True
+        settings.ENVIRONMENT = "production"
+        res2 = client.post("/api/auth/demo-login", json={"role": "Admin"})
+        assert res2.status_code == 403
+        assert "Demo authentication is disabled" in res2.json()["detail"]
+    finally:
+        settings.DEMO_AUTH_ENABLED = orig_demo
+        settings.ENVIRONMENT = orig_env
+
+

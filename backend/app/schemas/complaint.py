@@ -130,3 +130,10 @@ class ComplaintListResponse(BaseModel):
     totalPages: int = Field(..., alias="totalPages")
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+class TimelineNoteCreate(BaseModel):
+    note: str = Field(..., min_length=1, max_length=2000, description="Timeline note or remark text")
+    label: Optional[str] = Field(None, description="Optional custom timeline event label")
+
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+

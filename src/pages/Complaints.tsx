@@ -45,6 +45,7 @@ import {
   canTransferBureau,
   canUpdateCaseStatus,
   canUploadCaseDocument,
+  canViewComplaint,
   fmt,
   getDaysRemaining,
   getInstitution,
@@ -84,33 +85,29 @@ export function ComplaintsPage({
   const [complainant, setComplainant] = useState('All')
   const [officerFilter, setOfficerFilter] = useState('All')
 
-  // Scoped list based on demo role
+  // Scoped list based on authenticated role
   const roleScopedComplaints = complaints.filter((c) => {
     if (currentRole === 'Complainant') {
-      // Citizen sees their own complaints, student grievances, or any grievance submitted by them in session
-      return (
-        c.complainantEmail?.toLowerCase() === currentUser?.email?.toLowerCase() ||
-        c.complainantName?.toLowerCase() === currentUser?.name?.toLowerCase() ||
-        c.complainantType === 'Student' ||
-        c.timeline?.some(
-          (t) =>
-            t.role === 'Complainant' &&
-            (t.by?.toLowerCase().includes(currentUser?.name?.toLowerCase() || '') ||
-              t.by?.toLowerCase().includes('complainant') ||
-              t.by?.toLowerCase().includes('citizen'))
-        )
+      // Citizen sees ONLY their own authorized complaints matching authenticated email
+      return Boolean(
+        currentUser?.email &&
+        c.complainantEmail &&
+        c.complainantEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase()
       )
     }
     if (currentRole === 'Officer') {
-      // Officers default to their assigned bureau or assigned officer
-      if (officerFilter === 'MyAssigned') {
-        return c.officer === currentUser?.name
-      }
-      return true
+      // Officers can view ONLY cases explicitly assigned to them
+      return (
+        c.officer === currentUser?.name ||
+        Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
+      )
     }
     if (currentRole === 'BureauAdmin') {
-      // Bureau admin focus
-      return bureau === 'All' ? true : c.bureau === bureau
+      // Bureau admin restricted strictly to authorized Bureau
+      return (
+        currentUser?.bureau === 'All' ||
+        c.bureau.toUpperCase() === (currentUser?.bureau || '').toUpperCase()
+      )
     }
     return true
   })
@@ -1246,17 +1243,28 @@ export function DetailsPage({
     )
   }
 
-  if (!c) {
+  const viewPermission = canViewComplaint(currentUser, c)
+  if (!viewPermission.allowed) {
     return (
-      <Card className="p-8 text-center max-w-lg mx-auto my-12">
-        <h3 className="text-base font-bold text-slate-900">Case Record Not Found</h3>
-        <p className="mt-2 text-xs text-slate-600">The requested grievance docket could not be retrieved or no case was selected.</p>
-        <div className="mt-4">
-          <Button variant="primary" size="sm" onClick={onBack}>
-            Return to Case Worklist
-          </Button>
-        </div>
-      </Card>
+      <div className="space-y-4">
+        <Button variant="outline" size="sm" onClick={onBack}>
+          <ArrowLeft size={16} /> Back to complaints
+        </Button>
+        <Card className="p-8 text-center max-w-lg mx-auto my-12">
+          <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+            <Lock size={24} />
+          </div>
+          <h3 className="text-base font-bold text-slate-900">Access Restricted</h3>
+          <p className="mt-2 text-xs text-slate-600 leading-relaxed">
+            {viewPermission.reason || 'You are not authorized to view the sensitive dossier data for this docket.'}
+          </p>
+          <div className="mt-4">
+            <Button variant="primary" size="sm" onClick={onBack}>
+              Return to Authorized Cases
+            </Button>
+          </div>
+        </Card>
+      </div>
     )
   }
 

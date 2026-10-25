@@ -32,6 +32,8 @@ interface DemoRoleConfig {
   accent: string
 }
 
+const IS_DEMO_AUTH_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.VITE_DEMO_AUTH === 'true')
+
 const DEMO_ROLES: DemoRoleConfig[] = [
   {
     role: 'Complainant',
@@ -96,28 +98,11 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
     setErrorMessage(null)
 
     try {
-      // 1. Primary path: authenticate credentials against POST /api/auth/login
+      // Primary path: authenticate credentials against POST /api/auth/login
       const res = await loginApi({ email: email.trim(), password })
       onLogin(res.user, res.accessToken)
     } catch (err: unknown) {
-      // 2. Development fallback: try demo-login if standard password fails on seeded demo accounts
-      const isKnownDemoAccount = DEMO_ROLES.some(
-        (r) => r.email.toLowerCase() === email.trim().toLowerCase()
-      )
-
-      if (isKnownDemoAccount) {
-        try {
-          const demoRes = await demoLoginApi({
-            email: email.trim(),
-            role: selectedRole,
-          })
-          onLogin(demoRes.user, demoRes.accessToken)
-          return
-        } catch {
-          // Fall through to display primary error
-        }
-      }
-
+      // Invalid credentials must remain invalid credentials. Never fall back to demo login.
       const msg =
         err instanceof Error
           ? err.message
@@ -364,25 +349,27 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
               </button>
             </div>
 
-            {/* Quick 1-click login pills */}
-            <div className="pt-3 border-t border-slate-100">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                Quick 1-Click Role Access:
+            {/* Quick 1-click login pills (development / demo mode only) */}
+            {IS_DEMO_AUTH_ENABLED && (
+              <div className="pt-3 border-t border-slate-100">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Quick 1-Click Role Access (Dev/Demo):
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {DEMO_ROLES.map((r) => (
+                    <button
+                      key={r.role}
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => handleQuickLogin(r)}
+                      className="rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition"
+                    >
+                      {r.title}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {DEMO_ROLES.map((r) => (
-                  <button
-                    key={r.role}
-                    type="button"
-                    disabled={isLoading}
-                    onClick={() => handleQuickLogin(r)}
-                    className="rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition"
-                  >
-                    {r.title}
-                  </button>
-                ))}
-              </div>
-            </div>
+            )}
           </form>
 
           {/* Footer Metadata */}

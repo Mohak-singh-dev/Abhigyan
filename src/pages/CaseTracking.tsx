@@ -54,18 +54,20 @@ export default function CaseTracking({
   // Scoped complaints list based on role
   const roleScopedComplaints = complaints.filter((c) => {
     if (currentRole === 'Complainant') {
-      return (
-        c.complainantEmail?.toLowerCase() === currentUser?.email?.toLowerCase() ||
-        c.complainantName?.toLowerCase() === currentUser?.name?.toLowerCase() ||
-        c.complainantType === 'Student' ||
-        c.timeline?.some(
-          (t) =>
-            t.role === 'Complainant' &&
-            (t.by?.toLowerCase().includes(currentUser?.name?.toLowerCase() || '') ||
-              t.by?.toLowerCase().includes('complainant') ||
-              t.by?.toLowerCase().includes('citizen'))
-        )
+      return Boolean(
+        currentUser?.email &&
+        c.complainantEmail &&
+        c.complainantEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase()
       )
+    }
+    if (currentRole === 'Officer') {
+      return (
+        c.officer === currentUser?.name ||
+        Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
+      )
+    }
+    if (currentRole === 'BureauAdmin') {
+      return currentUser?.bureau === 'All' || c.bureau.toUpperCase() === currentUser?.bureau.toUpperCase()
     }
     return true
   })
@@ -73,7 +75,7 @@ export default function CaseTracking({
   const activeComplaint =
     roleScopedComplaints.find((c) => c.id === selectedCaseId) ||
     roleScopedComplaints[0] ||
-    complaints[0]
+    null
 
   const inst = getInstitution(activeComplaint?.institutionId)
   const overdue = activeComplaint ? isOverdue(activeComplaint) : false

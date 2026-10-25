@@ -17,6 +17,7 @@ from app.schemas.complaint import (
     ComplaintListResponse,
     ComplaintStatusUpdate,
     ComplaintAssignmentUpdate,
+    TimelineNoteCreate,
 )
 from app.schemas.timeline import TimelineEventRead
 from app.auth import get_current_user, check_case_access
@@ -147,8 +148,27 @@ def create_complaint(
                 detail=f"Complaint with Case ID '{case_id}' already exists."
             )
 
-    # 3. Default Officer & User assignment
-    officer_name = complaint_in.officer.strip() if complaint_in.officer and complaint_in.officer.strip() else get_default_officer(complaint_in.bureau)
+    # 3. Default Officer & User assignment - Safe bureau-based assignment
+    if current_user and current_user.role in ("Admin", "BureauAdmin"):
+        if current_user.role == "BureauAdmin" and current_user.bureau != "All":
+            if complaint_in.officer and complaint_in.officer.strip():
+                candidate_officer = complaint_in.officer.strip()
+                cand_user = db.query(User).filter(User.name == candidate_officer).first()
+                if cand_user and cand_user.bureau != "All" and cand_user.bureau.upper() != current_user.bureau.upper():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Restricted: Bureau Admin cannot assign case to officer in {cand_user.bureau} Bureau."
+                    )
+                officer_name = candidate_officer
+            else:
+                officer_name = get_default_officer(complaint_in.bureau)
+        else:
+            # System Admin
+            officer_name = complaint_in.officer.strip() if complaint_in.officer and complaint_in.officer.strip() else get_default_officer(complaint_in.bureau)
+    else:
+        # Complainants or public unauthenticated submissions MUST NEVER self-assign officers
+        officer_name = get_default_officer(complaint_in.bureau)
+
     assigned_user = db.query(User).filter(User.name == officer_name).first()
     assigned_user_id = assigned_user.id if assigned_user else None
 
@@ -164,26 +184,19 @@ def create_complaint(
         complainant_phone = complaint_in.complainantPhone.strip() if complaint_in.complainantPhone and complaint_in.complainantPhone.strip() else None
         intake_user_id = None
 
-    # 5. Filing Date & Due Date SLA
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    date_val = complaint_in.date.strip() if complaint_in.date and complaint_in.date.strip() else now_str
-    if complaint_in.due and complaint_in.due.strip():
-        due_val = complaint_in.due.strip()
-    else:
-        sla_days = get_sla_days(complaint_in.priority)
-        try:
-            base_date = datetime.strptime(date_val, "%Y-%m-%d")
-        except ValueError:
-            base_date = datetime.now(timezone.utc)
-        due_val = (base_date + timedelta(days=sla_days)).strftime("%Y-%m-%d")
+    # 5. Server-generated Filing Date & Due Date SLA - NEVER trust client
+    server_now = datetime.now(timezone.utc)
+    date_val = server_now.strftime("%Y-%m-%d")
+    sla_days = get_sla_days(complaint_in.priority)
+    due_val = (server_now + timedelta(days=sla_days)).strftime("%Y-%m-%d")
 
     # 6. Permanent ID
     perm_id = complaint_in.institutionPermanentId.strip() if complaint_in.institutionPermanentId and complaint_in.institutionPermanentId.strip() else inst.aicte_id
 
-    # 7. Workflow next action & last action date
-    status_val = complaint_in.status if complaint_in.status else "Pending"
-    next_action_val = complaint_in.nextAction.strip() if complaint_in.nextAction and complaint_in.nextAction.strip() else get_default_next_action(status_val, complaint_in.bureau)
-    last_action_date_val = complaint_in.lastActionDate.strip() if complaint_in.lastActionDate and complaint_in.lastActionDate.strip() else date_val
+    # 7. Workflow status, next action & last action date - Safe initial status ALWAYS "Pending"
+    status_val = "Pending"
+    next_action_val = get_default_next_action(status_val, complaint_in.bureau)
+    last_action_date_val = date_val
 
     # 8. Instantiate and save model along with initial timeline events in one transaction
     new_complaint = Complaint(
@@ -273,12 +286,7 @@ def list_complaints(
 
     # 1. Role-based scoping
     if current_user.role == "Complainant":
-        query = query.filter(
-            or_(
-                Complaint.complainant_email.ilike(current_user.email.strip()),
-                Complaint.complainant_name.ilike(current_user.name.strip()),
-            )
-        )
+        query = query.filter(Complaint.complainant_email.ilike(current_user.email.strip()))
     elif current_user.role == "BureauAdmin":
         if current_user.bureau != "All":
             if bureau and bureau.strip() and bureau.lower() != "all" and bureau.strip().upper() != current_user.bureau.upper():
@@ -288,14 +296,12 @@ def list_complaints(
                 )
             query = query.filter(Complaint.bureau.ilike(current_user.bureau))
     elif current_user.role == "Officer":
-        if current_user.bureau != "All":
-            query = query.filter(
-                or_(
-                    Complaint.officer.ilike(current_user.name.strip()),
-                    Complaint.assigned_user_id == current_user.id,
-                    Complaint.bureau.ilike(current_user.bureau),
-                )
+        query = query.filter(
+            or_(
+                Complaint.officer.ilike(current_user.name.strip()),
+                Complaint.assigned_user_id == current_user.id,
             )
+        )
 
     # 2. General filtering
     if bureau and bureau.strip() and bureau.lower() != "all" and current_user.role != "BureauAdmin":
@@ -401,6 +407,72 @@ def get_complaint_timeline(
         )
         for t in events
     ]
+
+@router.post("/{id}/timeline", response_model=TimelineEventRead, status_code=status.HTTP_201_CREATED)
+def add_complaint_timeline_note(
+    id: str,
+    payload: TimelineNoteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Append an authorized investigation milestone, note, or complainant update to the complaint timeline.
+    Enforces role-based case access:
+    - Complainant: Only on own case.
+    - Officer: Only on explicitly assigned case.
+    - BureauAdmin: Only on cases in authorized Bureau.
+    - Admin: System-wide authority.
+    """
+    complaint = db.query(Complaint).filter(Complaint.id.ilike(id.strip())).first()
+    if not complaint:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Complaint with ID or Case ID '{id}' was not found."
+        )
+
+    check_case_access(current_user, complaint, action="add_remark")
+
+    now_dt = datetime.now(timezone.utc)
+    date_val = now_dt.strftime("%Y-%m-%d %H:%M")
+    today_date = now_dt.strftime("%Y-%m-%d")
+
+    if payload.label and payload.label.strip():
+        action_label = payload.label.strip()
+    elif current_user.role == "Complainant":
+        action_label = "Supplementary Statement / Complainant Update Logged"
+    else:
+        action_label = "Investigation Action & Inquiry Milestone Logged"
+
+    event = ComplaintTimeline(
+        complaint_id=complaint.id,
+        label=action_label,
+        date=date_val,
+        by=f"{current_user.name} ({current_user.designation or current_user.role})",
+        role=current_user.role,
+        note=payload.note.strip(),
+        user_id=current_user.id,
+    )
+
+    try:
+        complaint.last_action_date = today_date
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+    except Exception:
+        db.rollback()
+        raise
+
+    return TimelineEventRead(
+        id=event.id if event.id is not None else 1,
+        complaintId=event.complaint_id,
+        label=event.label,
+        date=event.date,
+        by=event.by,
+        role=event.role,
+        note=event.note,
+        userId=event.user_id,
+        createdAt=event.created_at if event.created_at is not None else now_dt,
+    )
 
 @router.patch("/{id}/status", response_model=ComplaintRead)
 @router.post("/{id}/status", response_model=ComplaintRead)

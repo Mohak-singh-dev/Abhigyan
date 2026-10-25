@@ -74,6 +74,7 @@ export interface Complaint {
   category: string
   priority: Priority
   officer: string
+  assignedUserId?: string
   status: Status
   date: string
   due: string

@@ -85,15 +85,8 @@ export default function Sidebar({
       case 'Complainant':
         return [
           { id: 'complaints', label: 'My Grievances', icon: FileText },
-          { id: 'submit', label: 'Submit Grievance', icon: FilePlus },
-          { id: 'tracking', label: 'Track My Docket', icon: FolderGit2 },
-          {
-            id: 'notifications',
-            label: 'Alerts & Updates',
-            icon: Bell,
-            badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
-            badgeColor: 'bg-rose-500 text-white',
-          },
+          { id: 'submit', label: 'Submit Grievances', icon: FilePlus },
+          { id: 'tracking', label: 'Track My Dockets', icon: FolderGit2 },
         ]
       case 'Officer':
         return [
@@ -119,7 +112,6 @@ export default function Sidebar({
         return [
           { id: 'dashboard', label: 'Bureau Dashboard', icon: LayoutDashboard },
           { id: 'complaints', label: 'Bureau Complaints', icon: FileText },
-          { id: 'submit', label: 'Register Grievance', icon: FilePlus },
           { id: 'institutions', label: 'Institutions', icon: Building2 },
           {
             id: 'overlaps',
@@ -144,7 +136,6 @@ export default function Sidebar({
         return [
           { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
           { id: 'complaints', label: 'All Complaints', icon: FileText },
-          { id: 'submit', label: 'Register Grievance', icon: FilePlus },
           { id: 'institutions', label: 'Institutions', icon: Building2 },
           {
             id: 'overlaps',

@@ -945,13 +945,12 @@ export const canUpdateCaseStatus = (
     return { allowed: true }
   }
   if (user.role === 'Officer') {
-    // 1. Authorized case check
+    // 1. Authorized case check - Officer can only mutate explicitly assigned cases
     const isAssigned = complaint.officer === user.name
-    const isSameBureau = user.bureau === 'All' || complaint.bureau === user.bureau
-    if (!isAssigned && !isSameBureau) {
+    if (!isAssigned) {
       return {
         allowed: false,
-        reason: `Handling Officer is neither assigned to docket ${complaint.id} nor part of ${complaint.bureau} Bureau.`,
+        reason: `Restricted: Handling Officer is neither assigned to docket ${complaint.id} nor authorized to access unassigned cases.`,
       }
     }
 
@@ -971,6 +970,45 @@ export const canUpdateCaseStatus = (
 }
 
 /**
+ * Rule 0: Dossier read access authorization.
+ */
+export const canViewComplaint = (
+  user: UserProfile | undefined,
+  complaint: Complaint
+): PermissionCheckResult => {
+  if (!user) return { allowed: false, reason: 'Authentication required.' }
+  if (user.role === 'Admin') return { allowed: true }
+  if (user.role === 'BureauAdmin') {
+    if (user.bureau === 'All' || complaint.bureau.toUpperCase() === user.bureau.toUpperCase()) return { allowed: true }
+    return {
+      allowed: false,
+      reason: `Restricted: Docket belongs to ${complaint.bureau}; your administrative jurisdiction is ${user.bureau}.`,
+    }
+  }
+  if (user.role === 'Officer') {
+    if (complaint.officer === user.name) return { allowed: true }
+    return {
+      allowed: false,
+      reason: `Handling Officer is neither assigned to docket ${complaint.id} nor authorized to access unassigned cases.`,
+    }
+  }
+  if (user.role === 'Complainant') {
+    if (
+      user.email &&
+      complaint.complainantEmail &&
+      complaint.complainantEmail.trim().toLowerCase() === user.email.trim().toLowerCase()
+    ) {
+      return { allowed: true }
+    }
+    return {
+      allowed: false,
+      reason: 'Complainants are only authorized to access complaints submitted by themselves.',
+    }
+  }
+  return { allowed: false, reason: 'Unauthorized.' }
+}
+
+/**
  * Rule 4: Action remarks authorization
  */
 export const canAddCaseRemarks = (
@@ -980,24 +1018,24 @@ export const canAddCaseRemarks = (
   if (!user) return { allowed: false, reason: 'Authentication required.' }
   if (user.role === 'Admin') return { allowed: true }
   if (user.role === 'BureauAdmin') {
-    if (user.bureau === 'All' || complaint.bureau === user.bureau) return { allowed: true }
+    if (user.bureau === 'All' || complaint.bureau.toUpperCase() === user.bureau.toUpperCase()) return { allowed: true }
     return {
       allowed: false,
       reason: `Case belongs to ${complaint.bureau}; your administrative jurisdiction is ${user.bureau}.`,
     }
   }
   if (user.role === 'Officer') {
-    if (complaint.officer === user.name || complaint.bureau === user.bureau) return { allowed: true }
+    if (complaint.officer === user.name) return { allowed: true }
     return {
       allowed: false,
-      reason: `Officer is not authorized to log inquiry notes on cases outside ${user.bureau} Bureau.`,
+      reason: `Restricted: Handling Officer is neither assigned to docket ${complaint.id} nor authorized to add remarks to unassigned cases.`,
     }
   }
   if (user.role === 'Complainant') {
     if (
-      complaint.complainantEmail === user.email ||
-      complaint.complainantName === user.name ||
-      complaint.complainantType === 'Student'
+      user.email &&
+      complaint.complainantEmail &&
+      complaint.complainantEmail.trim().toLowerCase() === user.email.trim().toLowerCase()
     ) {
       return { allowed: true }
     }

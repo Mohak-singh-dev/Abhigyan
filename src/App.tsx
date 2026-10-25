@@ -28,6 +28,12 @@ import {
   demoLoginApi,
   logoutAuth,
 } from './api/auth'
+import {
+  updateComplaintStatusApi,
+  assignComplaintApi,
+  addComplaintTimelineNoteApi,
+  createComplaintApi,
+} from './api/complaints'
 import AppLayout from './components/layout/AppLayout'
 import Dashboard from './pages/Dashboard'
 import { ComplaintsPage, DetailsPage, SubmitComplaint } from './pages/Complaints'
@@ -41,14 +47,13 @@ import Settings from './pages/Settings'
 import Login from './pages/Login'
 import { Button, Card } from './components/ui'
 
-// Permitted pages matrix per role
+// Permitted pages matrix per role - BureauAdmin and Admin cannot submit grievances
 const ROLE_PERMITTED_PAGES: Record<Role, Page[]> = {
   Complainant: ['complaints', 'submit', 'details', 'tracking', 'notifications'],
   Officer: ['complaints', 'details', 'institutions', 'overlaps', 'tracking', 'notifications'],
   BureauAdmin: [
     'dashboard',
     'complaints',
-    'submit',
     'details',
     'institutions',
     'overlaps',
@@ -60,7 +65,6 @@ const ROLE_PERMITTED_PAGES: Record<Role, Page[]> = {
   Admin: [
     'dashboard',
     'complaints',
-    'submit',
     'details',
     'institutions',
     'overlaps',
@@ -76,13 +80,33 @@ export const getDefaultLandingPage = (role: Role): Page => {
   return role === 'Complainant' || role === 'Officer' ? 'complaints' : 'dashboard'
 }
 
+export const getNotificationStorageKey = (userId?: string): string => {
+  return userId ? `abhigyan_notifications_${userId}` : 'abhigyan_notifications_anonymous'
+}
+
+export const loadUserNotifications = (userId?: string): AppNotification[] => {
+  if (!userId) return initialNotifications
+  try {
+    const key = getNotificationStorageKey(userId)
+    const stored = localStorage.getItem(key)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+      }
+    }
+  } catch {
+    // Malformed JSON fallback
+  }
+  return initialNotifications
+}
+
 const STORAGE_KEYS = {
   IS_LOGGED_IN: 'abhigyan_is_logged_in',
   ROLE: 'abhigyan_role',
   PAGE: 'abhigyan_active_page',
   CASE_ID: 'abhigyan_selected_case_id',
   COMPLAINTS: 'abhigyan_complaints',
-  NOTIFICATIONS: 'abhigyan_notifications',
   USERS: USER_STORAGE_KEY,
   CURRENT_USER: AUTH_USER_KEY,
   TOKEN: AUTH_TOKEN_KEY,
@@ -204,17 +228,15 @@ export default function App() {
   })
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS)
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      }
-    } catch {
-      // fallback
-    }
-    return initialNotifications
+    return loadUserNotifications(currentUser?.id)
   })
+
+  // Reload user-namespaced notifications whenever authenticated user changes
+  useEffect(() => {
+    if (currentUser?.id) {
+      setNotifications(loadUserNotifications(currentUser.id))
+    }
+  }, [currentUser?.id])
 
   const [overlapStates, setOverlapStates] = useState<Record<string, OverlapReviewState>>(() => {
     try {
@@ -293,12 +315,15 @@ export default function App() {
   }, [selectedCaseId])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications))
-    } catch {
-      // ignore
+    if (currentUser?.id) {
+      try {
+        const key = getNotificationStorageKey(currentUser.id)
+        localStorage.setItem(key, JSON.stringify(notifications))
+      } catch {
+        // ignore
+      }
     }
-  }, [notifications])
+  }, [notifications, currentUser?.id])
 
   useEffect(() => {
     try {
@@ -372,7 +397,7 @@ export default function App() {
     setActivePage('details')
   }
 
-  const handleStatusChange = (id: string, newStatus: Status, noteText?: string) => {
+  const handleStatusChange = async (id: string, newStatus: Status, noteText?: string) => {
     const target = complaints.find((c) => c.id === id)
     if (!target) return
 
@@ -388,6 +413,26 @@ export default function App() {
         read: false,
       }
       setNotifications((prev) => [blockedNotif, ...prev])
+      return
+    }
+
+    // Call FastAPI backend to verify & persist status mutation if token exists
+    try {
+      if (getAuthToken()) {
+        await updateComplaintStatusApi(id, { status: newStatus, remarks: noteText })
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Server rejected status update.'
+      const deniedNotif: AppNotification = {
+        id: `notif-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Status Update Blocked by Server (FastAPI 403)',
+        message: errorMsg,
+        timestamp: `${TODAY} 11:30`,
+        caseId: id,
+        read: false,
+      }
+      setNotifications((prev) => [deniedNotif, ...prev])
       return
     }
 
@@ -432,7 +477,7 @@ export default function App() {
     setNotifications((prev) => [notif, ...prev])
   }
 
-  const handleAssignOfficer = (id: string, newOfficer: string, reason?: string) => {
+  const handleAssignOfficer = async (id: string, newOfficer: string, reason?: string) => {
     const target = complaints.find((c) => c.id === id)
     if (!target) return
 
@@ -456,6 +501,26 @@ export default function App() {
     const assignmentReason =
       reason?.trim() ||
       `Administrative officer reassignment within ${target.bureau} Bureau.`
+
+    // Call FastAPI backend to verify & persist assignment if token exists
+    try {
+      if (getAuthToken()) {
+        await assignComplaintApi(id, { officer: newOfficer, reason: assignmentReason })
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Server rejected officer reassignment.'
+      const deniedNotif: AppNotification = {
+        id: `notif-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Assignment Blocked by Server (FastAPI 403)',
+        message: errorMsg,
+        timestamp: `${TODAY} 11:30`,
+        caseId: id,
+        read: false,
+      }
+      setNotifications((prev) => [deniedNotif, ...prev])
+      return
+    }
 
     setComplaints((prev) =>
       prev.map((c) => {
@@ -505,7 +570,7 @@ export default function App() {
     setNotifications((prev) => [notif, ...prev])
   }
 
-  const handleCrossBureauTransfer = (
+  const handleCrossBureauTransfer = async (
     id: string,
     newBureau: Bureau,
     newOfficer: string,
@@ -526,6 +591,26 @@ export default function App() {
         read: false,
       }
       setNotifications((prev) => [blockedNotif, ...prev])
+      return
+    }
+
+    // Call FastAPI backend to verify & persist transfer if token exists
+    try {
+      if (getAuthToken()) {
+        await assignComplaintApi(id, { bureau: newBureau, officer: newOfficer, reason })
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Server rejected cross-bureau transfer.'
+      const deniedNotif: AppNotification = {
+        id: `notif-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Cross-Bureau Transfer Blocked by Server (FastAPI 403)',
+        message: errorMsg,
+        timestamp: `${TODAY} 11:30`,
+        caseId: id,
+        read: false,
+      }
+      setNotifications((prev) => [deniedNotif, ...prev])
       return
     }
 
@@ -779,7 +864,7 @@ export default function App() {
     setNotifications((prev) => [notif, ...prev])
   }
 
-  const handleAddTimelineNote = (id: string, noteText: string) => {
+  const handleAddTimelineNote = async (id: string, noteText: string) => {
     const target = complaints.find((c) => c.id === id)
     if (!target) return
 
@@ -798,14 +883,34 @@ export default function App() {
       return
     }
 
+    const noteLabel =
+      currentRole === 'Complainant'
+        ? 'Supplementary Statement / Complainant Update Logged'
+        : 'Investigation Action & Inquiry Milestone Logged'
+
+    // Call FastAPI backend to verify & persist timeline remark if token exists
+    try {
+      if (getAuthToken()) {
+        await addComplaintTimelineNoteApi(id, { note: noteText, label: noteLabel })
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Server rejected remark.'
+      const deniedNotif: AppNotification = {
+        id: `notif-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Remark Blocked by Server (FastAPI 403)',
+        message: errorMsg,
+        timestamp: `${TODAY} 11:30`,
+        caseId: id,
+        read: false,
+      }
+      setNotifications((prev) => [deniedNotif, ...prev])
+      return
+    }
+
     setComplaints((prev) =>
       prev.map((c) => {
         if (c.id === id) {
-          const noteLabel =
-            currentRole === 'Complainant'
-              ? 'Supplementary Statement / Complainant Update Logged'
-              : 'Investigation Action & Inquiry Milestone Logged'
-
           return {
             ...c,
             lastActionDate: TODAY,
@@ -826,7 +931,7 @@ export default function App() {
     )
   }
 
-  const handleAddDocument = (id: string, newDoc: CaseDocument) => {
+  const handleAddDocument = async (id: string, newDoc: CaseDocument) => {
     const target = complaints.find((c) => c.id === id)
     if (!target) return
 
@@ -845,6 +950,29 @@ export default function App() {
       return
     }
 
+    const docLabel = `Supporting record attached: ${newDoc.name}`
+    const docNote = `Document (${newDoc.size}) uploaded with ${newDoc.visibility} visibility.`
+
+    // Call FastAPI backend to verify & persist supporting document note if token exists
+    try {
+      if (getAuthToken()) {
+        await addComplaintTimelineNoteApi(id, { note: docNote, label: docLabel })
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Server rejected document upload.'
+      const deniedNotif: AppNotification = {
+        id: `notif-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Document Upload Blocked by Server (FastAPI 403)',
+        message: errorMsg,
+        timestamp: `${TODAY} 11:30`,
+        caseId: id,
+        read: false,
+      }
+      setNotifications((prev) => [deniedNotif, ...prev])
+      return
+    }
+
     setComplaints((prev) =>
       prev.map((c) => {
         if (c.id === id) {
@@ -856,11 +984,11 @@ export default function App() {
             timeline: [
               ...c.timeline,
               {
-                label: `Supporting record attached: ${newDoc.name}`,
+                label: docLabel,
                 date: `${TODAY} 11:30`,
                 by: `${currentUser.name} (${currentRole})`,
                 role: currentRole,
-                note: `Document (${newDoc.size}) uploaded with ${newDoc.visibility} visibility.`,
+                note: docNote,
               },
             ],
           }
@@ -881,17 +1009,66 @@ export default function App() {
     setNotifications((prev) => [notif, ...prev])
   }
 
-  const handleAddComplaint = (newComplaint: Complaint) => {
-    setComplaints((prev) => [newComplaint, ...prev])
+  const handleAddComplaint = async (newComplaint: Complaint) => {
+    // Only Complainants can submit grievances in the current scope
+    if (currentRole !== 'Complainant') {
+      const blockedNotif: AppNotification = {
+        id: `notif-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Grievance Submission Restricted',
+        message: 'Only registered complainants may submit grievances in the current scope. Proxy registration is not permitted.',
+        timestamp: `${TODAY} 11:00`,
+        read: false,
+      }
+      setNotifications((prev) => [blockedNotif, ...prev])
+      return
+    }
+
+    let complaintToAdd = newComplaint
+    try {
+      if (getAuthToken()) {
+        const created = await createComplaintApi({
+          title: newComplaint.title,
+          description: newComplaint.description,
+          bureau: newComplaint.bureau,
+          category: newComplaint.category,
+          priority: newComplaint.priority,
+          institutionId: newComplaint.institutionId,
+          complainantType: newComplaint.complainantType,
+          complainantName: newComplaint.complainantName,
+          complainantEmail: newComplaint.complainantEmail,
+          complainantPhone: newComplaint.complainantPhone,
+          institutionPermanentId: newComplaint.institutionPermanentId,
+        })
+        if (created) {
+          complaintToAdd = { ...newComplaint, ...created }
+        }
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Server rejected complaint creation.'
+      const deniedNotif: AppNotification = {
+        id: `notif-denied-${Date.now()}`,
+        type: 'alert',
+        title: 'Submission Blocked by Server (FastAPI 403/400)',
+        message: errorMsg,
+        timestamp: `${TODAY} 11:00`,
+        caseId: newComplaint.id,
+        read: false,
+      }
+      setNotifications((prev) => [deniedNotif, ...prev])
+      return
+    }
+
+    setComplaints((prev) => [complaintToAdd, ...prev])
 
     // Push system notification
     const newNotif: AppNotification = {
       id: `notif-${Date.now()}`,
       type: 'info',
-      title: `New Case Registered: ${newComplaint.id}`,
-      message: `A new complaint has been filed against ${newComplaint.institutionPermanentId || newComplaint.institutionId} under ${newComplaint.bureau} bureau.`,
+      title: `New Case Registered: ${complaintToAdd.id}`,
+      message: `A new complaint has been filed against ${complaintToAdd.institutionPermanentId || complaintToAdd.institutionId} under ${complaintToAdd.bureau} bureau.`,
       timestamp: `${TODAY} 11:00`,
-      caseId: newComplaint.id,
+      caseId: complaintToAdd.id,
       read: false,
     }
     setNotifications((prev) => [newNotif, ...prev])

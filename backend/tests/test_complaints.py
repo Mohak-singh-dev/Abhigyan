@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from app.database import get_db
 from app.models.complaint import Complaint
@@ -321,3 +321,70 @@ def test_get_complaint_not_found(client: TestClient):
         assert "not found" in data["detail"].lower()
     finally:
         app.dependency_overrides.clear()
+
+def test_create_complaint_tampered_payload_forced_safe_defaults(client: TestClient):
+    """
+    Regression Test: A complainant or client submitting a tampered payload containing
+    privileged status ("Resolved"), forged officer, fake creation date, or arbitrary due date
+    MUST be sanitized server-side.
+    Status is forced to 'Pending', officer routed to default, date/due generated server-side.
+    """
+    from app.main import app
+    from app.auth import get_current_user
+    session = MockComplaintDBSession()
+
+    mock_complainant = User(
+        id="u0",
+        name="Aman Verma",
+        email="aman@student.edu.in",
+        role="Complainant",
+        designation="Student",
+        bureau="PGRC",
+        status="Active",
+    )
+
+    def override_db():
+        yield session
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = lambda: mock_complainant
+    try:
+        tampered_payload = {
+            "title": "Malicious tampered complaint creation attempt",
+            "description": "Attempting to inject a pre-resolved complaint with fake officer and dates.",
+            "bureau": "PGRC",
+            "category": "Fee Regulation",
+            "priority": "High",
+            "institutionId": "i1",
+            "complainantType": "Student",
+            "complainantName": "Aman Verma",
+            "complainantEmail": "aman@student.edu.in",
+            "status": "Resolved",
+            "officer": "Anita Verma",
+            "date": "2020-01-01",
+            "due": "2020-01-02",
+            "lastActionDate": "2020-01-01",
+            "nextAction": "Forged next action"
+        }
+        response = client.post("/api/complaints", json=tampered_payload)
+        assert response.status_code == 201
+        data = response.json()
+
+        # 1. Status forced to Pending
+        assert data["status"] == "Pending"
+
+        # 2. Officer routed to safe bureau default, NOT client-supplied
+        assert data["officer"] == "Rajesh Kumar"
+
+        # 3. Date is current server date, NOT 2020-01-01
+        today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        assert data["date"] == today_utc
+
+        # 4. Due date is server-calculated from priority SLA, NOT 2020-01-02
+        assert data["due"] != "2020-01-02"
+        # High priority SLA is 7 days
+        expected_due = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")
+        assert data["due"] == expected_due
+    finally:
+        app.dependency_overrides.clear()
+

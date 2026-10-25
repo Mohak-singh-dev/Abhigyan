@@ -121,25 +121,21 @@ def require_roles(*allowed_roles: str):
 def check_case_access(user: User, complaint: Complaint, action: str = "view") -> None:
     """
     Enforce fine-grained role-based and Bureau-scoped access control on a complaint case.
-    Supported actions: 'view', 'update_status', 'assign'.
+    Supported actions: 'view', 'update_status', 'assign', 'add_remark'.
     Raises HTTPException(403) on unauthorized attempts.
     """
-    # 1. Complainant role enforcement
+    # 1. Complainant role enforcement: Must match authenticated complainant email
     if user.role == "Complainant":
-        if action == "view":
-            user_email_match = (
-                complaint.complainant_email
-                and complaint.complainant_email.strip().lower() == user.email.strip().lower()
+        user_email_match = (
+            complaint.complainant_email
+            and complaint.complainant_email.strip().lower() == user.email.strip().lower()
+        )
+        if not user_email_match:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access forbidden: Complainants are only authorized to access complaints submitted by themselves.",
             )
-            user_name_match = (
-                complaint.complainant_name
-                and complaint.complainant_name.strip().lower() == user.name.strip().lower()
-            )
-            if not (user_email_match or user_name_match):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Access forbidden: Complainants are only authorized to access complaints submitted by themselves.",
-                )
+        if action in ("view", "add_remark"):
             return
         elif action == "update_status":
             raise HTTPException(
@@ -158,7 +154,7 @@ def check_case_access(user: User, complaint: Complaint, action: str = "view") ->
 
     # 3. BureauAdmin role: Scoped to their Bureau (or 'All')
     if user.role == "BureauAdmin":
-        is_same_bureau = (user.bureau == "All" or complaint.bureau == user.bureau)
+        is_same_bureau = (user.bureau == "All" or complaint.bureau.upper() == user.bureau.upper())
         if not is_same_bureau:
             if action == "assign":
                 raise HTTPException(
@@ -170,6 +166,11 @@ def check_case_access(user: User, complaint: Complaint, action: str = "view") ->
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Restricted: Docket belongs to {complaint.bureau}; your administrative jurisdiction is {user.bureau}.",
                 )
+            elif action == "add_remark":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Restricted: Docket belongs to {complaint.bureau}; your administrative jurisdiction is {user.bureau}.",
+                )
             else: # view
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -177,7 +178,7 @@ def check_case_access(user: User, complaint: Complaint, action: str = "view") ->
                 )
         return
 
-    # 4. Officer role: Scoped to assigned case or their Bureau
+    # 4. Officer role: Scoped strictly to cases explicitly assigned to that officer
     if user.role == "Officer":
         if action == "assign":
             raise HTTPException(
@@ -186,15 +187,14 @@ def check_case_access(user: User, complaint: Complaint, action: str = "view") ->
             )
 
         is_assigned = (
-            complaint.officer == user.name
+            (complaint.officer and complaint.officer.strip().lower() == user.name.strip().lower())
             or (complaint.assigned_user_id and complaint.assigned_user_id == user.id)
         )
-        is_same_bureau = (user.bureau == "All" or complaint.bureau == user.bureau)
 
-        if not is_assigned and not is_same_bureau:
+        if not is_assigned:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Restricted: Handling Officer is neither assigned to docket {complaint.id} nor part of {complaint.bureau} Bureau.",
+                detail=f"Restricted: Handling Officer is neither assigned to docket {complaint.id} nor authorized to access unassigned cases.",
             )
         return
 
@@ -203,3 +203,4 @@ def check_case_access(user: User, complaint: Complaint, action: str = "view") ->
         status_code=status.HTTP_403_FORBIDDEN,
         detail=f"Access forbidden: Unrecognized user role '{user.role}'.",
     )
+
