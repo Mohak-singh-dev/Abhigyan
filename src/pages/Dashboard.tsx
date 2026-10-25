@@ -32,9 +32,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { Complaint, Page, Role, Status } from '../types'
+import type { Complaint, Page, Role, Status, UserProfile } from '../types'
 import { BUREAUS, BUREAU_INFO, CURRENT_OFFICER, TODAY, isOverdue, overlaps } from '../data'
-import { Badge, Button, Card, CardHeader, PageTitle, Stat } from '../components/ui'
+import { Button, Card, CardHeader, PageTitle, Stat } from '../components/ui'
 import ComplaintTable from '../components/ComplaintTable'
 
 interface DashboardProps {
@@ -43,6 +43,7 @@ interface DashboardProps {
   onStatus: (id: string, s: Status) => void
   onNavigate: (page: Page) => void
   currentRole: Role
+  currentUser?: UserProfile
 }
 
 export default function Dashboard({
@@ -51,6 +52,7 @@ export default function Dashboard({
   onStatus,
   onNavigate,
   currentRole,
+  currentUser,
 }: DashboardProps) {
   const [bureauFilter, setBureauFilter] = useState<string>('All')
 
@@ -282,7 +284,6 @@ export default function Dashboard({
               <h3 className="text-sm font-bold text-slate-900">
                 Cross-Bureau Overlap Detection Engine Active
               </h3>
-              <Badge v="SIH Innovation" className="bg-teal-100 text-teal-800 border-teal-200" />
             </div>
             <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
               Monitoring duplicate grievances filed across{' '}
@@ -347,6 +348,8 @@ export default function Dashboard({
           onStatus={onStatus}
           compact={false}
           showActions={true}
+          currentRole={currentRole}
+          currentUser={currentUser}
         />
       </Card>
     </div>

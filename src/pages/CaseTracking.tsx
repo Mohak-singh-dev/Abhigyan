@@ -12,28 +12,77 @@ import {
   FileSearch,
   FileText,
   GitMerge,
+  Paperclip,
   Search,
+  Send,
   Shield,
   UserCheck,
 } from 'lucide-react'
-import type { Complaint, Status } from '../types'
-import { fmt, getDaysRemaining, getInstitution, instName, isOverdue } from '../data'
+import type { Complaint, Role, Status, UserProfile } from '../types'
+import {
+  canAddCaseRemarks,
+  canUpdateCaseStatus,
+  fmt,
+  getDaysRemaining,
+  getInstitution,
+  instName,
+  isOverdue,
+} from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle, SearchBox } from '../components/ui'
 
 interface CaseTrackingProps {
   complaints: Complaint[]
   onOpen: (id: string) => void
-  onStatus: (id: string, s: Status) => void
+  onStatus: (id: string, s: Status, note?: string) => void
+  onAddNote?: (id: string, noteText: string) => void
+  currentRole?: Role
+  currentUser?: UserProfile
 }
 
-export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrackingProps) {
-  const [selectedCaseId, setSelectedCaseId] = useState(complaints[0].id)
+export default function CaseTracking({
+  complaints,
+  onOpen,
+  onStatus,
+  onAddNote,
+  currentRole = 'Admin',
+  currentUser,
+}: CaseTrackingProps) {
+  const [selectedCaseId, setSelectedCaseId] = useState(complaints[0]?.id || '')
   const [searchQuery, setSearchQuery] = useState('')
+  const [followUpNote, setFollowUpNote] = useState('')
 
-  const activeComplaint = complaints.find((c) => c.id === selectedCaseId) || complaints[0]
-  const inst = getInstitution(activeComplaint.institutionId)
-  const overdue = isOverdue(activeComplaint)
-  const daysLeft = getDaysRemaining(activeComplaint.due)
+  // Scoped complaints list based on role
+  const roleScopedComplaints = complaints.filter((c) => {
+    if (currentRole === 'Complainant') {
+      return (
+        c.complainantEmail?.toLowerCase() === currentUser?.email?.toLowerCase() ||
+        c.complainantName?.toLowerCase() === currentUser?.name?.toLowerCase() ||
+        c.complainantType === 'Student' ||
+        c.timeline?.some(
+          (t) =>
+            t.role === 'Complainant' &&
+            (t.by?.toLowerCase().includes(currentUser?.name?.toLowerCase() || '') ||
+              t.by?.toLowerCase().includes('complainant') ||
+              t.by?.toLowerCase().includes('citizen'))
+        )
+      )
+    }
+    return true
+  })
+
+  const activeComplaint =
+    roleScopedComplaints.find((c) => c.id === selectedCaseId) ||
+    roleScopedComplaints[0] ||
+    complaints[0]
+
+  const inst = getInstitution(activeComplaint?.institutionId)
+  const overdue = activeComplaint ? isOverdue(activeComplaint) : false
+  const daysLeft = activeComplaint ? getDaysRemaining(activeComplaint.due) : 0
+
+  // Permission check for remarks
+  const remarkCheck = activeComplaint
+    ? canAddCaseRemarks(currentUser, activeComplaint)
+    : { allowed: false, reason: 'No active complaint.' }
 
   // 5 Statutory Milestones for AICTE Complaint Redressal
   const milestones = [
@@ -44,59 +93,99 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
       current: false,
     },
     {
-      title: 'Bureau Allocation',
-      desc: `Jurisdiction established with ${activeComplaint.bureau} bureau`,
+      title: 'Bureau Jurisdiction',
+      desc: `Jurisdiction established with ${activeComplaint?.bureau} Cell`,
       done: true,
-      current: activeComplaint.status === 'Pending',
+      current: activeComplaint?.status === 'Pending',
     },
     {
       title: 'Preliminary Inquiry',
-      desc: `Assigned to ${activeComplaint.officer} for record verification`,
-      done: activeComplaint.status !== 'Pending',
-      current: activeComplaint.status === 'In Progress',
+      desc:
+        currentRole === 'Complainant'
+          ? 'Under verification with institute registrar'
+          : `Assigned to ${activeComplaint?.officer} for record audit`,
+      done: activeComplaint?.status !== 'Pending',
+      current: activeComplaint?.status === 'In Progress',
     },
     {
-      title: 'Hearing & Show-Cause',
+      title: 'Hearing & Notice',
       desc: 'Notice served to management; compliance documents requested',
-      done: activeComplaint.status === 'Resolved' || activeComplaint.status === 'Escalated',
-      current: activeComplaint.status === 'Escalated',
+      done: activeComplaint?.status === 'Resolved' || activeComplaint?.status === 'Escalated',
+      current: activeComplaint?.status === 'Escalated',
     },
     {
-      title: 'Final Determination & Order',
-      desc: 'Compliance accepted or regulatory penalty issued',
-      done: activeComplaint.status === 'Resolved',
+      title: 'Determination & Order',
+      desc: 'Compliance accepted or statutory regulatory penalty issued',
+      done: activeComplaint?.status === 'Resolved',
       current: false,
     },
   ]
 
-  const filteredList = complaints.filter(
+  const filteredList = roleScopedComplaints.filter(
     (c) =>
       !searchQuery.trim() ||
       c.id.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
       c.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+      (c.institutionPermanentId &&
+        c.institutionPermanentId.toLowerCase().includes(searchQuery.toLowerCase().trim())) ||
       instName(c.institutionId).toLowerCase().includes(searchQuery.toLowerCase().trim())
   )
+
+  const handleFollowUpSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!followUpNote.trim() || !onAddNote || !activeComplaint || !remarkCheck.allowed) return
+    onAddNote(activeComplaint.id, followUpNote.trim())
+    setFollowUpNote('')
+  }
+
+  // Filter documents visible to current role
+  const visibleDocs = (activeComplaint?.documents || []).filter((doc) => {
+    if (currentRole === 'Complainant') {
+      return doc.visibility === 'Public'
+    }
+    return true
+  })
+
+  if (!activeComplaint) {
+    return (
+      <div className="space-y-6">
+        <PageTitle
+          title="Live Case Tracking &amp; SLA Surveillance"
+          sub="No complaints currently available for this view"
+        />
+        <Card className="py-16 text-center text-xs text-slate-500">
+          No active case files to display.
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
       <PageTitle
-        title="Live Case Tracking &amp; SLA Surveillance"
+        title={
+          currentRole === 'Complainant'
+            ? 'Track My Grievance Lifecycle'
+            : 'Live Case Tracking &amp; SLA Surveillance'
+        }
         sub="Monitor lifecycle progression, inquiry milestones, and statutory resolution compliance for any case file"
-        tag="SLA Monitor"
+        tag={currentRole === 'Complainant' ? 'Citizen SLA Tracker' : 'SLA Monitor'}
       />
 
-      {/* Case Selector Pills and Search */}
+      {/* Case Selector and Search */}
       <Card padding="p-4">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              Select or Search Complaint Case:
+              {currentRole === 'Complainant'
+                ? 'Select One of Your Dockets to Track:'
+                : 'Select or Search Complaint Case:'}
             </span>
             <div className="w-72">
               <SearchBox
                 value={searchQuery}
                 onChange={setSearchQuery}
-                placeholder="Search case ID or institute..."
+                placeholder="Search case ID, Permanent PID, or institute..."
               />
             </div>
           </div>
@@ -135,7 +224,7 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
 
       {/* Selected Case Tracker Detail */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Left Column: Lifecycle Progress Steps & Audit Log */}
+        {/* Left Column: Lifecycle Progress Steps, Documents & Audit Log */}
         <div className="space-y-6 lg:col-span-2">
           {/* Active Case Summary Card */}
           <Card className="border-t-4 border-t-navy-800">
@@ -152,10 +241,27 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
                 <h2 className="text-base font-bold text-slate-900 leading-snug">
                   {activeComplaint.title}
                 </h2>
-                <p className="text-xs text-slate-500">
-                  Target: <strong>{instName(activeComplaint.institutionId)}</strong> • Filed on{' '}
-                  {fmt(activeComplaint.date)}
-                </p>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <span>
+                    Target: <strong>{instName(activeComplaint.institutionId)}</strong>
+                  </span>
+                  <span>•</span>
+                  <span className="font-mono">
+                    PID: <strong>{activeComplaint.institutionPermanentId || inst?.aicteId}</strong>
+                  </span>
+                  <span>•</span>
+                  <span>Filed on {fmt(activeComplaint.date)}</span>
+                </div>
+
+                {/* Scheduled Next Administrative Action */}
+                <div className="mt-3 rounded-lg bg-slate-50 p-3 border border-slate-200 text-xs">
+                  <div className="font-bold text-slate-700 uppercase text-[10px] tracking-wider">
+                    Next Statutory Action Milestone:
+                  </div>
+                  <div className="text-slate-900 font-semibold mt-0.5">
+                    {activeComplaint.nextAction || 'Preliminary scrutiny and registrar representation'}
+                  </div>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -166,13 +272,13 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
                   className="text-xs"
                 >
                   <Eye size={13} />
-                  <span>Full File Dossier</span>
+                  <span>Full Case File</span>
                 </Button>
               </div>
             </div>
 
             {/* Visual Milestones Stepper */}
-            <div className="mt-8">
+            <div className="mt-8 border-t border-slate-100 pt-6">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">
                 Statutory Milestone Progression
               </h3>
@@ -203,11 +309,60 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
             </div>
           </Card>
 
-          {/* Full Chronological Progression */}
+          {/* Attached Case Documents Snapshot */}
+          <Card>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Permitted Documents &amp; Evidence Repository
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {currentRole === 'Complainant'
+                    ? 'Official notices and citizen-accessible filings'
+                    : 'All filed exhibits, inquiry memos, and counter-affidavits'}
+                </p>
+              </div>
+              <span className="text-xs font-bold text-slate-600 font-mono">
+                {visibleDocs.length} Document(s)
+              </span>
+            </div>
+
+            <div className="space-y-2 mt-4">
+              {visibleDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-2.5 text-xs"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Paperclip size={14} className="text-teal-600 flex-shrink-0" />
+                    <span className="font-semibold text-slate-800 truncate">{doc.name}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">({doc.size})</span>
+                  </div>
+                  <span
+                    className={`text-[9px] px-2 py-0.5 rounded font-semibold ${
+                      doc.visibility === 'Public'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {doc.visibility}
+                  </span>
+                </div>
+              ))}
+
+              {visibleDocs.length === 0 && (
+                <div className="py-4 text-center text-xs text-slate-400">
+                  No public documents currently available for this file.
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Full Chronological Progression & Follow-Up Form */}
           <Card>
             <CardHeader
-              title="Official Timeline Records"
-              sub="Timestamped audit trail of all institutional hearings and status transitions"
+              title="Official Chronological History"
+              sub="Timestamped audit trail of all institutional hearings, follow-up filings, and status transitions"
             />
             <div className="space-y-4">
               {activeComplaint.timeline.map((item, idx) => (
@@ -224,7 +379,14 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
                       <span className="text-[11px] font-mono text-slate-400">{fmt(item.date)}</span>
                     </div>
                     {item.by && (
-                      <p className="text-[11px] text-slate-500 mt-0.5">Authorised by: {item.by}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Authorised by: <span className="font-semibold text-slate-700">{item.by}</span>
+                        {item.role && (
+                          <span className="ml-1 text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-mono">
+                            {item.role}
+                          </span>
+                        )}
+                      </p>
                     )}
                     {item.note && (
                       <p className="mt-1 text-xs text-slate-700 bg-white p-2 rounded border border-slate-100">
@@ -235,6 +397,41 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
                 </div>
               ))}
             </div>
+
+            {/* Follow-up Note Form */}
+            <form onSubmit={handleFollowUpSubmit} className="mt-6 border-t border-slate-100 pt-4">
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                {currentRole === 'Complainant'
+                  ? 'Submit Additional Information / Follow-Up on this Docket:'
+                  : 'Record Official Hearing Note / Inquiry Action:'}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  disabled={!remarkCheck.allowed}
+                  value={followUpNote}
+                  onChange={(e) => setFollowUpNote(e.target.value)}
+                  placeholder={
+                    !remarkCheck.allowed
+                      ? remarkCheck.reason
+                      : currentRole === 'Complainant'
+                      ? 'e.g. Received new fee notice from management on 24-Oct; requesting expedited review...'
+                      : 'e.g. Scrutiny hearing conducted with institute dean; response awaited by 30-Oct...'
+                  }
+                  className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:border-navy-600 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  className="text-xs"
+                  disabled={!remarkCheck.allowed}
+                >
+                  <Send size={13} />
+                  <span>Submit</span>
+                </Button>
+              </div>
+            </form>
           </Card>
         </div>
 
@@ -244,7 +441,7 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
           <Card className="border-t-4 border-t-amber-500">
             <CardHeader
               title="SLA Resolution Status"
-              sub="SLA windows are configurable in Settings (demonstration values only)"
+              sub="Statutory compliance window surveillance"
             />
 
             <div className="space-y-4">
@@ -278,45 +475,126 @@ export default function CaseTracking({ complaints, onOpen, onStatus }: CaseTrack
                   <span className="font-semibold text-slate-800">{fmt(activeComplaint.date)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Configured SLA Window:</span>
-                  <span className="font-semibold text-slate-800">14 Days (demo setting)</span>
+                  <span className="text-slate-500">Permanent Institution ID:</span>
+                  <span className="font-mono font-bold text-slate-800">
+                    {activeComplaint.institutionPermanentId || inst?.aicteId}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Bureau Jurisdiction:</span>
-                  <span className="font-semibold text-slate-800">{activeComplaint.bureau}</span>
+                  <span className="font-semibold text-slate-800">
+                    {activeComplaint.bureau} Cell
+                  </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Current Officer:</span>
-                  <span className="font-semibold text-slate-800">{activeComplaint.officer}</span>
+                  <span className="text-slate-500">Responsible Authority:</span>
+                  <span className="font-semibold text-slate-800">
+                    {currentRole === 'Complainant'
+                      ? `${activeComplaint.bureau} Grievance Officer`
+                      : activeComplaint.officer}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Last Action Date:</span>
+                  <span className="font-semibold text-slate-800">
+                    {fmt(activeComplaint.lastActionDate || activeComplaint.date)}
+                  </span>
                 </div>
               </div>
 
-              {/* Status Update Quick Bar */}
-              <div className="border-t border-slate-100 pt-3">
-                <label className="block text-xs font-bold text-slate-700 mb-2">
-                  Advance Case Status:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onStatus(activeComplaint.id, 'In Progress')}
-                    disabled={activeComplaint.status === 'In Progress'}
-                    className="text-xs"
-                  >
-                    Set In Progress
-                  </Button>
-                  <Button
-                    variant="teal"
-                    size="sm"
-                    onClick={() => onStatus(activeComplaint.id, 'Resolved')}
-                    disabled={activeComplaint.status === 'Resolved'}
-                    className="text-xs"
-                  >
-                    Mark Resolved
-                  </Button>
+              {/* Status Update Quick Bar (Only for Officers / Admins) */}
+              {currentRole !== 'Complainant' ? (
+                <div className="border-t border-slate-100 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-slate-700">
+                      Advance Case Status:
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      Current: {activeComplaint.status}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {activeComplaint.status === 'Pending' && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => onStatus(activeComplaint.id, 'In Progress')}
+                        disabled={
+                          !canUpdateCaseStatus(currentUser, activeComplaint, 'In Progress').allowed
+                        }
+                        className="w-full text-xs"
+                      >
+                        Start Preliminary Inquiry (In Progress)
+                      </Button>
+                    )}
+
+                    {activeComplaint.status === 'In Progress' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onStatus(activeComplaint.id, 'Escalated')}
+                          disabled={
+                            !canUpdateCaseStatus(currentUser, activeComplaint, 'Escalated').allowed
+                          }
+                          className="text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                        >
+                          Escalate Docket
+                        </Button>
+                        <Button
+                          variant="teal"
+                          size="sm"
+                          onClick={() => onStatus(activeComplaint.id, 'Resolved')}
+                          disabled={
+                            !canUpdateCaseStatus(currentUser, activeComplaint, 'Resolved').allowed
+                          }
+                          className="text-xs"
+                        >
+                          Mark Resolved
+                        </Button>
+                      </div>
+                    )}
+
+                    {activeComplaint.status === 'Escalated' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onStatus(activeComplaint.id, 'In Progress')}
+                          disabled={
+                            !canUpdateCaseStatus(currentUser, activeComplaint, 'In Progress').allowed
+                          }
+                          className="text-xs"
+                        >
+                          Return to Inquiry
+                        </Button>
+                        <Button
+                          variant="teal"
+                          size="sm"
+                          onClick={() => onStatus(activeComplaint.id, 'Resolved')}
+                          disabled={
+                            !canUpdateCaseStatus(currentUser, activeComplaint, 'Resolved').allowed
+                          }
+                          className="text-xs"
+                        >
+                          Mark Resolved
+                        </Button>
+                      </div>
+                    )}
+
+                    {activeComplaint.status === 'Resolved' && (
+                      <div className="rounded bg-slate-100 p-2.5 text-center text-[11px] text-slate-600 font-semibold border border-slate-200">
+                        Docket Resolved &amp; Closed (Terminal State)
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-lg bg-slate-100 p-2.5 text-center text-[11px] text-slate-500">
+                  Case status is updated by the assigned AICTE {activeComplaint.bureau} inquiry team following statutory review.
+                </div>
+              )}
             </div>
           </Card>
 

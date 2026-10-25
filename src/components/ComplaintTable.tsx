@@ -10,8 +10,8 @@ import {
   Eye,
   User,
 } from 'lucide-react'
-import type { Complaint, Status } from '../types'
-import { STATUSES, fmt, getDaysRemaining, instName, isOverdue } from '../data'
+import type { Complaint, Role, Status, UserProfile } from '../types'
+import { PERMITTED_STATUS_TRANSITIONS, STATUSES, canUpdateCaseStatus, fmt, getDaysRemaining, instName, isOverdue } from '../data'
 import { Badge, Button } from './ui'
 
 interface ComplaintTableProps {
@@ -20,6 +20,8 @@ interface ComplaintTableProps {
   onStatus?: (id: string, s: Status) => void
   compact?: boolean
   showActions?: boolean
+  currentRole?: Role
+  currentUser?: UserProfile
 }
 
 type SortField = 'id' | 'institution' | 'bureau' | 'priority' | 'status' | 'date' | 'due'
@@ -30,6 +32,8 @@ export default function ComplaintTable({
   onStatus,
   compact = false,
   showActions = true,
+  currentRole,
+  currentUser,
 }: ComplaintTableProps) {
   const [sortField, setSortField] = useState<SortField>('date')
   const [sortAsc, setSortAsc] = useState<boolean>(false)
@@ -230,17 +234,32 @@ export default function ComplaintTable({
                   className="whitespace-nowrap px-3 py-3"
                   onClick={(e) => onStatus && e.stopPropagation()}
                 >
-                  {onStatus ? (
+                  {onStatus &&
+                  currentRole !== 'Complainant' &&
+                  currentUser &&
+                  (currentUser.role === 'Admin' ||
+                    PERMITTED_STATUS_TRANSITIONS[c.status]?.some(
+                      (s) => canUpdateCaseStatus(currentUser, c, s).allowed
+                    )) ? (
                     <select
                       className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-2xs focus:border-navy-600 focus:outline-none"
                       value={c.status}
                       onChange={(e) => onStatus(c.id, e.target.value as Status)}
                     >
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
+                      <option value={c.status}>{c.status}</option>
+                      {currentUser.role === 'Admin'
+                        ? STATUSES.filter((s) => s !== c.status).map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))
+                        : (PERMITTED_STATUS_TRANSITIONS[c.status] || [])
+                            .filter((s) => canUpdateCaseStatus(currentUser, c, s).allowed)
+                            .map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
                     </select>
                   ) : (
                     <Badge v={c.status} />

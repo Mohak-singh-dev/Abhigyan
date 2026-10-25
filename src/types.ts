@@ -1,11 +1,12 @@
 export type Status = 'Pending' | 'In Progress' | 'Resolved' | 'Escalated'
 export type Priority = 'Critical' | 'High' | 'Medium' | 'Low'
 export type Bureau = 'RB' | 'PGRC' | 'Approval' | 'Academic' | 'SB' | 'EO'
-export type Role = 'Admin' | 'Officer'
+export type Role = 'Complainant' | 'BureauAdmin' | 'Officer' | 'Admin'
 
 export type Page =
   | 'dashboard'
   | 'complaints'
+  | 'submit'
   | 'details'
   | 'institutions'
   | 'overlaps'
@@ -15,10 +16,22 @@ export type Page =
   | 'users'
   | 'settings'
 
+export interface CaseDocument {
+  id: string
+  name: string
+  size: string
+  uploadDate: string
+  uploadedBy: string
+  uploaderRole: Role
+  visibility: 'Public' | 'Internal'
+  fileType?: string
+}
+
 export interface TimelineEvent {
   label: string
   date: string
   by?: string
+  role?: Role
   note?: string
 }
 
@@ -26,11 +39,36 @@ export interface Assignment {
   officer: string
   date: string
   by: string
+  byRole?: Role
+  previousOfficer?: string
+  reason?: string
+  bureau?: Bureau
+  previousBureau?: Bureau
+  type?: 'initial' | 'reassignment' | 'transfer'
+}
+
+export interface ReassignmentRequest {
+  id: string
+  requestedBy: string
+  requestedByRole: Role
+  requestDate: string
+  type: 'officer' | 'bureau'
+  currentOfficer: string
+  proposedOfficer?: string
+  currentBureau: Bureau
+  proposedBureau?: Bureau
+  reason: string
+  status: 'Pending' | 'Approved' | 'Rejected'
+  reviewedBy?: string
+  reviewedByRole?: Role
+  reviewDate?: string
+  reviewNote?: string
 }
 
 export interface Complaint {
   id: string
   institutionId: string
+  institutionPermanentId?: string
   bureau: Bureau
   category: string
   priority: Priority
@@ -42,9 +80,16 @@ export interface Complaint {
   description: string
   timeline: TimelineEvent[]
   assignments: Assignment[]
+  reassignmentRequests?: ReassignmentRequest[]
   complainantType?: 'Student' | 'Faculty' | 'Parent' | 'Whistleblower' | 'General Public'
+  complainantName?: string
+  complainantEmail?: string
+  complainantPhone?: string
   attachmentsCount?: number
+  documents?: CaseDocument[]
   remarks?: string
+  nextAction?: string
+  lastActionDate?: string
 }
 
 export interface Institution {
@@ -68,8 +113,11 @@ export interface Overlap {
   b: string
   similarity: number
   reasons: string[]
-  status?: 'pending' | 'linked' | 'dismissed'
+  status?: 'pending' | 'linked' | 'dismissed' | 'deferred'
   notes?: string
+  reviewedBy?: string
+  reviewedDate?: string
+  decisionNote?: string
 }
 
 export interface AppNotification {
@@ -80,6 +128,7 @@ export interface AppNotification {
   timestamp: string
   caseId?: string
   read: boolean
+  targetRole?: Role | 'All'
 }
 
 export interface UserProfile {
@@ -93,4 +142,5 @@ export interface UserProfile {
   phone: string
   activeCasesCount: number
   status: 'Active' | 'On Leave' | 'Inactive'
+  department?: string
 }

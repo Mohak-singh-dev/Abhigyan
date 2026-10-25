@@ -40,29 +40,39 @@ export default function Institutions({
   })
 
   const currentInst = institutions.find((i) => i.id === selectedInstId) || institutions[0]
-  const instComplaints = complaints.filter((c) => c.institutionId === currentInst.id)
+  const instComplaints = complaints.filter(
+    (c) =>
+      c.institutionId === currentInst.id ||
+      (c.institutionPermanentId && c.institutionPermanentId === currentInst.aicteId)
+  )
   const activeCount = instComplaints.filter((c) => c.status !== 'Resolved').length
   const resolvedCount = instComplaints.filter((c) => c.status === 'Resolved').length
+
+  const bureauCounts: Record<string, number> = {}
+  instComplaints.forEach((c) => {
+    bureauCounts[c.bureau] = (bureauCounts[c.bureau] || 0) + 1
+  })
 
   return (
     <div className="space-y-6">
       <PageTitle
-        title="Institutions Roster &amp; Risk Directory"
-        sub="Monitor complaint frequency, regulatory adherence, and risk exposure for technical colleges"
+        title="Institutions Roster &amp; Permanent ID Profiles"
+        sub="Monitor complaint frequency, cross-bureau density, and regulatory adherence linked by stable Permanent Institution ID"
+        tag="AICTE Registry"
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left Column: Search & Institution List */}
         <Card className="lg:col-span-1 space-y-4">
           <CardHeader
-            title="Registered Institutions"
-            sub={`${filtered.length} institutes indexed`}
+            title="Registered Technical Institutions"
+            sub={`${filtered.length} campuses indexed by Permanent ID`}
           />
 
           <SearchBox
             value={q}
             onChange={setQ}
-            placeholder="Search by name, city, AICTE ID..."
+            placeholder="Search by name, city, AICTE PID..."
           />
 
           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -93,7 +103,11 @@ export default function Institutions({
 
           <div className="max-h-[32rem] space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
             {filtered.map((inst) => {
-              const complaintsForThis = complaints.filter((c) => c.institutionId === inst.id)
+              const complaintsForThis = complaints.filter(
+                (c) =>
+                  c.institutionId === inst.id ||
+                  (c.institutionPermanentId && c.institutionPermanentId === inst.aicteId)
+              )
               const hasActive = complaintsForThis.some((c) => c.status !== 'Resolved')
               const isSelected = selectedInstId === inst.id
 
@@ -125,11 +139,8 @@ export default function Institutions({
                   </div>
 
                   <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-                    <span className="flex items-center gap-1">
-                      <MapPin size={11} className="text-slate-400" />
-                      <span>
-                        {inst.city}, {inst.state}
-                      </span>
+                    <span className="flex items-center gap-1 font-mono text-[10px]">
+                      PID: {inst.aicteId}
                     </span>
                     <span
                       className={`font-semibold ${
@@ -151,7 +162,7 @@ export default function Institutions({
           </div>
         </Card>
 
-        {/* Right Column: Detailed Institution Profile & Complaint Dossier */}
+        {/* Right Column: Detailed Institution Profile & Linked Dossier */}
         <div className="space-y-6 lg:col-span-2">
           {/* Profile Card */}
           <Card className="border-t-4 border-t-navy-800">
@@ -159,7 +170,7 @@ export default function Institutions({
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="rounded-md bg-navy-100 px-2 py-0.5 font-mono text-xs font-bold text-navy-800">
-                    {currentInst.aicteId}
+                    PID: {currentInst.aicteId}
                   </span>
                   <Badge v={currentInst.type} />
                   <Badge v={`Risk: ${currentInst.riskLevel || 'Low'}`} />
@@ -185,8 +196,30 @@ export default function Institutions({
               </div>
             </div>
 
+            {/* Bureau Breakdown for this Institution */}
+            <div className="mt-4 pt-3 border-t border-slate-100">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-2">
+                Cross-Bureau Case Distribution for this Permanent ID:
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {Object.keys(bureauCounts).length > 0 ? (
+                  Object.entries(bureauCounts).map(([b, count]) => (
+                    <div
+                      key={b}
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs"
+                    >
+                      <Badge v={b} />
+                      <span className="font-bold text-slate-800">{count} docket(s)</span>
+                    </div>
+                  ))
+                ) : (
+                  <span className="text-xs text-slate-400">No dockets registered for this campus.</span>
+                )}
+              </div>
+            </div>
+
             {/* Quick Contact & Details grid */}
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 rounded-lg bg-slate-50/70 p-3.5 border border-slate-100 text-xs">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 rounded-lg bg-slate-50/70 p-3.5 border border-slate-100 text-xs">
               <div className="flex items-center gap-2 text-slate-600">
                 <Mail size={14} className="text-slate-400 flex-shrink-0" />
                 <span className="truncate">{currentInst.contactEmail || 'office@institute.ac.in'}</span>
@@ -201,15 +234,14 @@ export default function Institutions({
           {/* Associated Complaints Dossier */}
           <Card>
             <CardHeader
-              title={`Complaint History for ${currentInst.name}`}
-              sub={`${instComplaints.length} registered complaint files across all AICTE bureaus`}
+              title={`Consolidated Cases for Permanent ID: ${currentInst.aicteId}`}
+              sub={`All ${instComplaints.length} complaints filed across Regulation Bureau, PGRC, Approval, and Academic bureaus`}
             />
 
             <ComplaintTable
               rows={instComplaints}
               onOpen={onOpen}
-              compact={false}
-              showActions={true}
+              onStatus={() => {}}
             />
           </Card>
         </div>

@@ -1,20 +1,26 @@
+import { useState } from 'react'
 import {
   BarChart3,
   Bell,
   Building2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FilePlus,
   FileText,
   FolderGit2,
   GitMerge,
   Landmark,
   LayoutDashboard,
+  LogOut,
   Settings,
+  Shield,
   ShieldCheck,
+  User,
   UserCheck,
   Users,
 } from 'lucide-react'
-import type { Page, Role } from '../../types'
+import type { Page, Role, UserProfile } from '../../types'
 
 interface SidebarProps {
   activePage: Page
@@ -24,7 +30,9 @@ interface SidebarProps {
   unreadNotificationsCount: number
   pendingOverlapsCount: number
   currentRole: Role
-  onToggleRole: () => void
+  onSelectRole: (role: Role) => void
+  onSignOut?: () => void
+  currentUser?: UserProfile
 }
 
 interface NavConfig {
@@ -35,6 +43,29 @@ interface NavConfig {
   badgeColor?: string
 }
 
+const ROLE_INFO: Record<Role, { name: string; scope: string; short: string }> = {
+  Complainant: {
+    name: 'Complainant / Citizen',
+    scope: 'Personal Case Filing & Status',
+    short: 'Citizen',
+  },
+  BureauAdmin: {
+    name: 'Bureau / Cell Admin',
+    scope: 'PGRC Bureau Operations',
+    short: 'Bureau',
+  },
+  Officer: {
+    name: 'Handling Officer',
+    scope: 'Inquiry & Case Scrutiny',
+    short: 'Officer',
+  },
+  Admin: {
+    name: 'System Admin',
+    scope: 'Full AICTE Oversight',
+    short: 'Admin',
+  },
+}
+
 export default function Sidebar({
   activePage,
   onNavigate,
@@ -43,31 +74,101 @@ export default function Sidebar({
   unreadNotificationsCount,
   pendingOverlapsCount,
   currentRole,
-  onToggleRole,
+  onSelectRole,
+  onSignOut,
+  currentUser,
 }: SidebarProps) {
-  const navItems: NavConfig[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'complaints', label: 'All Complaints', icon: FileText },
-    { id: 'institutions', label: 'Institutions', icon: Building2 },
-    {
-      id: 'overlaps',
-      label: 'Overlap Detection',
-      icon: GitMerge,
-      badge: pendingOverlapsCount > 0 ? pendingOverlapsCount : undefined,
-      badgeColor: 'bg-amber-500 text-slate-900',
-    },
-    { id: 'tracking', label: 'Case Tracking', icon: FolderGit2 },
-    { id: 'reports', label: 'Reports & Analytics', icon: BarChart3 },
-    {
-      id: 'notifications',
-      label: 'Notifications',
-      icon: Bell,
-      badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
-      badgeColor: 'bg-rose-500 text-white',
-    },
-    { id: 'users', label: 'User Management', icon: Users },
-    { id: 'settings', label: 'Settings', icon: Settings },
-  ]
+  const [showRoleMenu, setShowRoleMenu] = useState(false)
+
+  const getNavItems = (): NavConfig[] => {
+    switch (currentRole) {
+      case 'Complainant':
+        return [
+          { id: 'complaints', label: 'My Grievances', icon: FileText },
+          { id: 'submit', label: 'Submit Grievance', icon: FilePlus },
+          { id: 'tracking', label: 'Track My Docket', icon: FolderGit2 },
+          {
+            id: 'notifications',
+            label: 'Alerts & Updates',
+            icon: Bell,
+            badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
+            badgeColor: 'bg-rose-500 text-white',
+          },
+        ]
+      case 'Officer':
+        return [
+          { id: 'complaints', label: 'Assigned Worklist', icon: FileText },
+          {
+            id: 'overlaps',
+            label: 'Overlap Review',
+            icon: GitMerge,
+            badge: pendingOverlapsCount > 0 ? pendingOverlapsCount : undefined,
+            badgeColor: 'bg-amber-500 text-slate-900',
+          },
+          { id: 'tracking', label: 'SLA Tracking', icon: FolderGit2 },
+          { id: 'institutions', label: 'Institutions Roster', icon: Building2 },
+          {
+            id: 'notifications',
+            label: 'Notifications',
+            icon: Bell,
+            badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
+            badgeColor: 'bg-rose-500 text-white',
+          },
+        ]
+      case 'BureauAdmin':
+        return [
+          { id: 'dashboard', label: 'Bureau Dashboard', icon: LayoutDashboard },
+          { id: 'complaints', label: 'Bureau Complaints', icon: FileText },
+          { id: 'submit', label: 'Register Grievance', icon: FilePlus },
+          { id: 'institutions', label: 'Institutions', icon: Building2 },
+          {
+            id: 'overlaps',
+            label: 'Overlap Detection',
+            icon: GitMerge,
+            badge: pendingOverlapsCount > 0 ? pendingOverlapsCount : undefined,
+            badgeColor: 'bg-amber-500 text-slate-900',
+          },
+          { id: 'tracking', label: 'Case Tracking', icon: FolderGit2 },
+          { id: 'reports', label: 'Reports & Workload', icon: BarChart3 },
+          { id: 'users', label: 'Officer Registry', icon: Users },
+          {
+            id: 'notifications',
+            label: 'Notifications',
+            icon: Bell,
+            badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
+            badgeColor: 'bg-rose-500 text-white',
+          },
+        ]
+      case 'Admin':
+      default:
+        return [
+          { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+          { id: 'complaints', label: 'All Complaints', icon: FileText },
+          { id: 'submit', label: 'Register Grievance', icon: FilePlus },
+          { id: 'institutions', label: 'Institutions', icon: Building2 },
+          {
+            id: 'overlaps',
+            label: 'Overlap Detection',
+            icon: GitMerge,
+            badge: pendingOverlapsCount > 0 ? pendingOverlapsCount : undefined,
+            badgeColor: 'bg-amber-500 text-slate-900',
+          },
+          { id: 'tracking', label: 'Case Tracking', icon: FolderGit2 },
+          { id: 'reports', label: 'Reports & Analytics', icon: BarChart3 },
+          {
+            id: 'notifications',
+            label: 'Notifications',
+            icon: Bell,
+            badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : undefined,
+            badgeColor: 'bg-rose-500 text-white',
+          },
+          { id: 'users', label: 'User Management', icon: Users },
+          { id: 'settings', label: 'Settings', icon: Settings },
+        ]
+    }
+  }
+
+  const navItems = getNavItems()
 
   const bureaus = [
     { code: 'RB', name: 'Regulation Bureau' },
@@ -75,6 +176,8 @@ export default function Sidebar({
     { code: 'Approval', name: 'Approval Bureau' },
     { code: 'Academic', name: 'Academic Bureau' },
   ]
+
+  const roleMeta = ROLE_INFO[currentRole] || ROLE_INFO.Admin
 
   return (
     <aside
@@ -92,11 +195,11 @@ export default function Sidebar({
             <div className="font-bold text-sm tracking-wide text-white leading-tight flex items-center gap-1.5">
               <span>Abhigyan</span>
               <span className="text-[10px] font-semibold uppercase px-1.5 py-0.2 rounded bg-teal-500/30 text-teal-200 border border-teal-400/30">
-                SIH
+                AICTE
               </span>
             </div>
             <div className="text-[11px] text-navy-200 truncate font-normal mt-0.5">
-              AICTE Complaint Monitoring
+              Complaint Monitoring Portal
             </div>
           </div>
         )}
@@ -105,8 +208,11 @@ export default function Sidebar({
       {/* Navigation List */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 scrollbar-thin">
         {!collapsed && (
-          <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-navy-200/60">
-            Core Modules
+          <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-navy-200/60 flex items-center justify-between">
+            <span>{currentRole === 'Complainant' ? 'Citizen Services' : 'Core Modules'}</span>
+            <span className="text-[9px] font-semibold text-teal-300 bg-white/10 px-1.5 py-0.2 rounded">
+              {roleMeta.short}
+            </span>
           </div>
         )}
         {navItems.map((item) => {
@@ -159,8 +265,8 @@ export default function Sidebar({
           )
         })}
 
-        {/* Bureau Tags Section */}
-        {!collapsed && (
+        {/* Bureau Tags Section - Only for Internal Roles */}
+        {!collapsed && currentRole !== 'Complainant' && (
           <div className="pt-5 mt-4 border-t border-white/10">
             <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-navy-200/60 flex items-center justify-between">
               <span>Integrated Bureaus</span>
@@ -182,35 +288,82 @@ export default function Sidebar({
       </nav>
 
       {/* Role Switcher & Collapse Toggle Footer */}
-      <div className="border-t border-white/10 p-3 space-y-2">
-        {/* Role toggle badge */}
-        {!collapsed ? (
-          <div className="flex items-center justify-between rounded-lg bg-white/5 p-2 border border-white/10">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-teal-500/20 text-teal-300 flex items-center justify-center text-xs font-bold">
-                {currentRole === 'Admin' ? 'A' : 'O'}
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-white leading-tight">
-                  {currentRole === 'Admin' ? 'Central Admin' : 'Case Officer'}
-                </div>
-                <div className="text-[10px] text-navy-200">
-                  {currentRole === 'Admin' ? 'Full AICTE Oversight' : 'Grievance Redressal'}
-                </div>
-              </div>
+      <div className="border-t border-white/10 p-3 space-y-2 relative">
+        {/* Role Switcher Popover */}
+        {showRoleMenu && !collapsed && (
+          <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl bg-slate-900 border border-white/15 p-2 shadow-xl z-50 text-xs">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Switch Demo Role
             </div>
-            <button
-              onClick={onToggleRole}
-              title="Switch user perspective for testing"
-              className="rounded bg-white/10 hover:bg-white/20 px-2 py-1 text-[10px] font-semibold text-teal-200 transition"
-            >
-              Switch
-            </button>
+            {(['Complainant', 'BureauAdmin', 'Officer', 'Admin'] as Role[]).map((r) => {
+              const meta = ROLE_INFO[r]
+              const isCur = currentRole === r
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => {
+                    onSelectRole(r)
+                    setShowRoleMenu(false)
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between transition ${
+                    isCur ? 'bg-teal-500/20 text-teal-300 font-bold' : 'hover:bg-white/10 text-slate-300'
+                  }`}
+                >
+                  <div>
+                    <div className="leading-tight">{meta.name}</div>
+                    <div className="text-[10px] text-slate-400">{meta.scope}</div>
+                  </div>
+                  {isCur && <span className="text-[10px] text-teal-300 font-mono">Active</span>}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Current Active Role Box */}
+        {!collapsed ? (
+          <div className="rounded-lg bg-white/5 p-2 border border-white/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-md bg-teal-500/20 text-teal-300 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  {currentUser?.avatarText || roleMeta.short[0]}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-white leading-tight truncate">
+                    {currentUser?.name || roleMeta.name}
+                  </div>
+                  <div className="text-[10px] text-navy-200 truncate">
+                    {roleMeta.name}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRoleMenu(!showRoleMenu)}
+                title="Switch demo perspective"
+                className="rounded bg-white/10 hover:bg-white/20 px-2 py-1 text-[10px] font-semibold text-teal-200 transition flex items-center gap-1 flex-shrink-0"
+              >
+                <span>Role</span>
+                <ChevronDown size={11} />
+              </button>
+            </div>
+
+            {onSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="mt-2 w-full flex items-center justify-center gap-1.5 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-white/10 rounded transition"
+              >
+                <LogOut size={13} />
+                <span>Sign Out / Switch User</span>
+              </button>
+            )}
           </div>
         ) : (
           <button
-            onClick={onToggleRole}
-            title={`Active role: ${currentRole} (Click to switch)`}
+            onClick={() => onSelectRole(currentRole === 'Admin' ? 'Officer' : currentRole === 'Officer' ? 'BureauAdmin' : currentRole === 'BureauAdmin' ? 'Complainant' : 'Admin')}
+            title={`Active role: ${roleMeta.name} (Click to cycle roles)`}
             className="w-full flex justify-center py-2 text-teal-300 hover:bg-white/10 rounded-lg transition"
           >
             <UserCheck size={18} />

@@ -383,23 +383,69 @@ const rawRows: RowData[] = [
   ],
 ]
 
+const defaultNextAction = (status: Status, bureau: Bureau): string => {
+  if (status === 'Pending') return `Jurisdiction verification and preliminary scrutiny by ${bureau} Cell`
+  if (status === 'In Progress') return 'Examine institution counter-affidavit and verify official registers'
+  if (status === 'Escalated') return 'Convene expedited joint hearing with institution management'
+  return 'Final compliance order signed and archived'
+}
+
+const getSampleDocuments = (id: string, complainantType: string, officer: string): import('./types').CaseDocument[] => [
+  {
+    id: `doc-${id}-1`,
+    name: 'Grievance_Affidavit_and_Supporting_Facts.pdf',
+    size: '1.4 MB',
+    uploadDate: '2026-10-18',
+    uploadedBy: complainantType === 'Student' ? 'Rohit Sharma (Complainant)' : `${complainantType} Complainant`,
+    uploaderRole: 'Complainant',
+    visibility: 'Public',
+    fileType: 'application/pdf',
+  },
+  {
+    id: `doc-${id}-2`,
+    name: 'Institution_Notice_or_Fee_Circular.pdf',
+    size: '850 KB',
+    uploadDate: '2026-10-19',
+    uploadedBy: complainantType === 'Student' ? 'Rohit Sharma (Complainant)' : `${complainantType} Complainant`,
+    uploaderRole: 'Complainant',
+    visibility: 'Public',
+    fileType: 'application/pdf',
+  },
+  {
+    id: `doc-${id}-3`,
+    name: 'Bureau_Internal_Scrutiny_Memo.pdf',
+    size: '340 KB',
+    uploadDate: '2026-10-21',
+    uploadedBy: `${officer} (Handling Officer)`,
+    uploaderRole: 'Officer',
+    visibility: 'Internal',
+    fileType: 'application/pdf',
+  },
+]
+
 export const initialComplaints: Complaint[] = rawRows.map(
   ([id, institutionId, bureau, category, priority, officer, status, date, due, title, description, complainantType]) => {
     const timeline: import('./types').TimelineEvent[] = [
-      { label: 'Complaint registered and verified on AICTE portal', date, by: 'System / Portal' },
-      { label: `Assigned to ${officer} (${bureau} Bureau)`, date: addDays(date, 1), by: 'Admin (Dr. S. Mehta)' },
+      { label: 'Complaint registered and verified on AICTE portal', date, by: 'System / Portal', role: 'Complainant' },
+      { label: `Assigned to ${officer} (${bureau} Bureau)`, date: addDays(date, 1), by: 'Admin (Dr. S. Mehta)', role: 'Admin' },
     ]
     if (status !== 'Pending') {
       timeline.push({
         label: status === 'Resolved' ? 'Investigation complete & Marked Resolved' : `Case status updated to ${status}`,
         date: addDays(date, 3),
         by: officer,
+        role: 'Officer',
         note: status === 'Escalated' ? 'Escalated to Bureau Head due to SLA breach and severity.' : undefined,
       })
     }
+    const inst = institutions.find((i) => i.id === institutionId)
+    const instAicteId = inst?.aicteId || '1-4821039'
+    const docs = getSampleDocuments(id, complainantType, officer)
+
     return {
       id,
       institutionId,
+      institutionPermanentId: instAicteId,
       bureau,
       category,
       priority,
@@ -410,9 +456,52 @@ export const initialComplaints: Complaint[] = rawRows.map(
       title,
       description,
       complainantType,
-      attachmentsCount: Math.floor(Math.random() * 3) + 1,
+      complainantName:
+        complainantType === 'Student'
+          ? 'Rohit Sharma'
+          : complainantType === 'Faculty'
+          ? 'Dr. K. Ramanathan'
+          : complainantType === 'Parent'
+          ? 'S. Sundaram'
+          : 'Verified Whistleblower',
+      complainantEmail:
+        complainantType === 'Student' ? 'rohit.sharma@student.edu.in' : 'citizen.grievance@aicte-portal.in',
+      attachmentsCount: docs.length,
+      documents: docs,
       timeline,
-      assignments: [{ officer, date: addDays(date, 1), by: 'Admin (Dr. S. Mehta)' }],
+      assignments: [
+        {
+          officer,
+          previousOfficer: 'Intake Registration Cell',
+          date: addDays(date, 1),
+          by: 'Dr. S. Mehta',
+          byRole: 'Admin',
+          reason: `Initial statutory assignment to ${bureau} Bureau based on subject classification.`,
+          bureau,
+          type: 'initial',
+        },
+      ],
+      reassignmentRequests:
+        id === 'PGRC-2026-0873'
+          ? [
+              {
+                id: 'req-2026-001',
+                requestedBy: 'Rajesh Kumar',
+                requestedByRole: 'Officer',
+                requestDate: '2026-10-24 15:30',
+                type: 'bureau',
+                currentOfficer: 'Rajesh Kumar',
+                currentBureau: 'PGRC',
+                proposedBureau: 'RB',
+                proposedOfficer: 'Anita Verma',
+                reason:
+                  'Investigation confirms institutional fee schedule violates state FRC notification cap; statutory determination falls under Regulation Bureau jurisdiction.',
+                status: 'Pending',
+              },
+            ]
+          : undefined,
+      nextAction: defaultNextAction(status, bureau),
+      lastActionDate: timeline[timeline.length - 1]?.date || date,
     }
   }
 )
@@ -530,7 +619,7 @@ export const initialNotifications: AppNotification[] = [
   {
     id: 'notif-5',
     type: 'info',
-    title: 'Monthly SIH Bureau Performance Report Generated',
+    title: 'Monthly AICTE Bureau Performance Report Generated',
     message: 'October 2026 complaint resolution analytics now compiled across RB, PGRC, Approval, and Academic bureaus.',
     timestamp: '2026-10-21 09:00',
     read: true,
@@ -539,16 +628,30 @@ export const initialNotifications: AppNotification[] = [
 
 export const userProfiles: UserProfile[] = [
   {
-    id: 'u1',
-    name: 'Dr. S. Mehta',
-    email: 'member-sec@aicte-india.org',
-    role: 'Admin',
-    designation: 'Member Secretary & Central Admin',
-    bureau: 'All',
-    avatarText: 'SM',
-    phone: '+91 11 2958 1000',
-    activeCasesCount: 15,
+    id: 'u0',
+    name: 'Rohit Sharma',
+    email: 'rohit.sharma@student.edu.in',
+    role: 'Complainant',
+    designation: 'Student Complainant (Citizen User)',
+    bureau: 'PGRC',
+    avatarText: 'RS',
+    phone: '+91 98765 43210',
+    activeCasesCount: 2,
     status: 'Active',
+    department: 'Complainant / Citizen Portal',
+  },
+  {
+    id: 'u1b',
+    name: 'Dr. Priya Nair',
+    email: 'priya.nair@aicte-india.org',
+    role: 'BureauAdmin',
+    designation: 'Bureau Chief & Cell Admin (PGRC)',
+    bureau: 'PGRC',
+    avatarText: 'PN',
+    phone: '+91 11 2958 1020',
+    activeCasesCount: 6,
+    status: 'Active',
+    department: 'Public Grievance Redressal Cell',
   },
   {
     id: 'u2',
@@ -561,6 +664,20 @@ export const userProfiles: UserProfile[] = [
     phone: '+91 11 2958 1042',
     activeCasesCount: 5,
     status: 'Active',
+    department: 'PGRC Scrutiny Cell',
+  },
+  {
+    id: 'u1',
+    name: 'Dr. S. Mehta',
+    email: 'member-sec@aicte-india.org',
+    role: 'Admin',
+    designation: 'Member Secretary & System Admin',
+    bureau: 'All',
+    avatarText: 'SM',
+    phone: '+91 11 2958 1000',
+    activeCasesCount: 15,
+    status: 'Active',
+    department: 'Executive Administration',
   },
   {
     id: 'u3',
@@ -642,4 +759,221 @@ export const getDaysRemaining = (due: string) => {
   const current = new Date(TODAY).getTime()
   const diffDays = Math.round((target - current) / (1000 * 3600 * 24))
   return diffDays
+}
+
+// Bureau Officer Rosters
+export const BUREAU_OFFICERS: Record<Bureau, string[]> = {
+  RB: ['Anita Verma', 'Meera Iyer'],
+  PGRC: ['Rajesh Kumar', 'Dr. Arun Sharma', 'Dr. Priya Nair'],
+  Approval: ['Suresh Patel'],
+  Academic: ['Meera Iyer'],
+  SB: ['Suresh Patel'],
+  EO: ['Dr. S. Mehta'],
+}
+
+export const getOfficersForBureau = (bureau: Bureau | 'All'): string[] => {
+  if (bureau === 'All') return OFFICERS
+  return BUREAU_OFFICERS[bureau] || OFFICERS
+}
+
+// Permitted status transitions per workflow rules
+export const PERMITTED_STATUS_TRANSITIONS: Record<Status, Status[]> = {
+  Pending: ['In Progress'],
+  'In Progress': ['Escalated', 'Resolved'],
+  Escalated: ['In Progress', 'Resolved'],
+  Resolved: [],
+}
+
+export interface PermissionCheckResult {
+  allowed: boolean
+  reason?: string
+}
+
+/**
+ * Rule 1 & 2: System Admin manages across system. Bureau Admin only within authorized Bureau.
+ * Rule 3: Handling Officers cannot directly assign or reassign cases.
+ */
+export const canAssignCase = (
+  user: UserProfile | undefined,
+  complaint: Complaint
+): PermissionCheckResult => {
+  if (!user) {
+    return { allowed: false, reason: 'Authentication required. No active user profile.' }
+  }
+  if (user.role === 'Admin') {
+    return { allowed: true }
+  }
+  if (user.role === 'BureauAdmin') {
+    if (user.bureau === 'All' || complaint.bureau === user.bureau) {
+      return { allowed: true }
+    }
+    return {
+      allowed: false,
+      reason: `Restricted: Bureau Admin is authorized only for ${user.bureau} cases. Docket ${complaint.id} belongs to ${complaint.bureau}.`,
+    }
+  }
+  if (user.role === 'Officer') {
+    return {
+      allowed: false,
+      reason: 'Handling Officers cannot directly reassign cases. Submit an explicit reassignment request through the workflow.',
+    }
+  }
+  return {
+    allowed: false,
+    reason: 'Complainants do not hold administrative case assignment permissions.',
+  }
+}
+
+/**
+ * Rule 5: Cross-Bureau transfers require an authorized decision (Admin or current Bureau Admin).
+ */
+export const canTransferBureau = (
+  user: UserProfile | undefined,
+  complaint: Complaint
+): PermissionCheckResult => {
+  if (!user) {
+    return { allowed: false, reason: 'Authentication required. No active user profile.' }
+  }
+  if (user.role === 'Admin') {
+    return { allowed: true }
+  }
+  if (user.role === 'BureauAdmin') {
+    if (user.bureau === 'All' || complaint.bureau === user.bureau) {
+      return { allowed: true }
+    }
+    return {
+      allowed: false,
+      reason: `Restricted: Bureau Admin can only transfer cases originating in their authorized Bureau (${user.bureau}).`,
+    }
+  }
+  if (user.role === 'Officer') {
+    return {
+      allowed: false,
+      reason: 'Handling Officers cannot directly transfer bureaus. Submit a cross-bureau transfer request for administrative approval.',
+    }
+  }
+  return {
+    allowed: false,
+    reason: 'Complainants do not hold cross-Bureau transfer permissions.',
+  }
+}
+
+/**
+ * Rule 4: Officers can update status only through permitted status transitions on authorized cases.
+ */
+export const canUpdateCaseStatus = (
+  user: UserProfile | undefined,
+  complaint: Complaint,
+  targetStatus: Status
+): PermissionCheckResult => {
+  if (!user) {
+    return { allowed: false, reason: 'Authentication required.' }
+  }
+  if (user.role === 'Complainant') {
+    return {
+      allowed: false,
+      reason: 'Complainants cannot modify official docket status.',
+    }
+  }
+  if (user.role === 'Admin') {
+    return { allowed: true }
+  }
+  if (user.role === 'BureauAdmin') {
+    if (user.bureau !== 'All' && complaint.bureau !== user.bureau) {
+      return {
+        allowed: false,
+        reason: `Restricted: Docket belongs to ${complaint.bureau}; your administrative jurisdiction is ${user.bureau}.`,
+      }
+    }
+    return { allowed: true }
+  }
+  if (user.role === 'Officer') {
+    // 1. Authorized case check
+    const isAssigned = complaint.officer === user.name
+    const isSameBureau = user.bureau === 'All' || complaint.bureau === user.bureau
+    if (!isAssigned && !isSameBureau) {
+      return {
+        allowed: false,
+        reason: `Handling Officer is neither assigned to docket ${complaint.id} nor part of ${complaint.bureau} Bureau.`,
+      }
+    }
+
+    // 2. Permitted transition check
+    const permitted = PERMITTED_STATUS_TRANSITIONS[complaint.status] || []
+    if (!permitted.includes(targetStatus)) {
+      return {
+        allowed: false,
+        reason: `Status transition from "${complaint.status}" to "${targetStatus}" is not permitted for Handling Officers. Allowed next: ${
+          permitted.length > 0 ? permitted.join(', ') : 'None (Case Closed)'
+        }.`,
+      }
+    }
+    return { allowed: true }
+  }
+  return { allowed: false, reason: 'Unauthorized role.' }
+}
+
+/**
+ * Rule 4: Action remarks authorization
+ */
+export const canAddCaseRemarks = (
+  user: UserProfile | undefined,
+  complaint: Complaint
+): PermissionCheckResult => {
+  if (!user) return { allowed: false, reason: 'Authentication required.' }
+  if (user.role === 'Admin') return { allowed: true }
+  if (user.role === 'BureauAdmin') {
+    if (user.bureau === 'All' || complaint.bureau === user.bureau) return { allowed: true }
+    return {
+      allowed: false,
+      reason: `Case belongs to ${complaint.bureau}; your administrative jurisdiction is ${user.bureau}.`,
+    }
+  }
+  if (user.role === 'Officer') {
+    if (complaint.officer === user.name || complaint.bureau === user.bureau) return { allowed: true }
+    return {
+      allowed: false,
+      reason: `Officer is not authorized to log inquiry notes on cases outside ${user.bureau} Bureau.`,
+    }
+  }
+  if (user.role === 'Complainant') {
+    if (
+      complaint.complainantEmail === user.email ||
+      complaint.complainantName === user.name ||
+      complaint.complainantType === 'Student'
+    ) {
+      return { allowed: true }
+    }
+    return { allowed: false, reason: 'You can only add updates to your own grievance filings.' }
+  }
+  return { allowed: false, reason: 'Unauthorized.' }
+}
+
+/**
+ * Rule 4: Document upload authorization
+ */
+export const canUploadCaseDocument = (
+  user: UserProfile | undefined,
+  complaint: Complaint
+): PermissionCheckResult => {
+  return canAddCaseRemarks(user, complaint)
+}
+
+/**
+ * Authority to review reassignment and transfer requests
+ */
+export const canReviewReassignmentRequest = (
+  user: UserProfile | undefined,
+  complaint: Complaint
+): PermissionCheckResult => {
+  if (!user) return { allowed: false, reason: 'Authentication required.' }
+  if (user.role === 'Admin') return { allowed: true }
+  if (user.role === 'BureauAdmin') {
+    if (user.bureau === 'All' || complaint.bureau === user.bureau) return { allowed: true }
+    return {
+      allowed: false,
+      reason: `Only ${complaint.bureau} Bureau Admin or System Admin can review reassignment requests for this case.`,
+    }
+  }
+  return { allowed: false, reason: 'Handling Officers and Complainants cannot decide reassignment requests.' }
 }

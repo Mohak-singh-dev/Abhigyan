@@ -12,7 +12,8 @@ interface AppLayoutProps {
   onMarkAllNotificationsRead: () => void
   currentUser: UserProfile
   currentRole: Role
-  onToggleRole: () => void
+  onSelectRole: (role: Role) => void
+  onSignOut?: () => void
   pendingOverlapsCount: number
   onSelectCase?: (caseId: string) => void
 }
@@ -26,7 +27,8 @@ export default function AppLayout({
   onMarkAllNotificationsRead,
   currentUser,
   currentRole,
-  onToggleRole,
+  onSelectRole,
+  onSignOut,
   pendingOverlapsCount,
   onSelectCase,
 }: AppLayoutProps) {
@@ -52,7 +54,9 @@ export default function AppLayout({
           unreadNotificationsCount={unreadCount}
           pendingOverlapsCount={pendingOverlapsCount}
           currentRole={currentRole}
-          onToggleRole={onToggleRole}
+          onSelectRole={onSelectRole}
+          onSignOut={onSignOut}
+          currentUser={currentUser}
         />
       </div>
 
@@ -78,7 +82,9 @@ export default function AppLayout({
           unreadNotificationsCount={unreadCount}
           pendingOverlapsCount={pendingOverlapsCount}
           currentRole={currentRole}
-          onToggleRole={onToggleRole}
+          onSelectRole={onSelectRole}
+          onSignOut={onSignOut}
+          currentUser={currentUser}
         />
       </div>
 
@@ -93,7 +99,8 @@ export default function AppLayout({
           onMarkAllNotificationsRead={onMarkAllNotificationsRead}
           currentUser={currentUser}
           currentRole={currentRole}
-          onToggleRole={onToggleRole}
+          onSelectRole={onSelectRole}
+          onSignOut={onSignOut}
           onSelectCase={onSelectCase}
         />
 
