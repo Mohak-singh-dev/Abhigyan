@@ -1,6 +1,7 @@
 /**
  * Complaints API Service
  * Interacts with FastAPI backend endpoints:
+ * - POST /api/complaints/classify (AI Advisory Preview)
  * - GET /api/complaints
  * - POST /api/complaints
  * - GET /api/complaints/{id}
@@ -11,7 +12,13 @@
  */
 
 import { apiClient } from './client'
-import type { Complaint, Status, TimelineEvent } from '../types'
+import type {
+  AIClassificationResult,
+  AIClassifyPayload,
+  Complaint,
+  Status,
+  TimelineEvent,
+} from '../types'
 
 export interface ComplaintStatusUpdatePayload {
   status: Status
@@ -37,11 +44,12 @@ export interface ComplaintCreatePayload {
   category: string
   priority: string
   institutionId: string
+  institutionPermanentId?: string
   complainantType?: string
   complainantName?: string
   complainantEmail?: string
   complainantPhone?: string
-  institutionPermanentId?: string
+  remarks?: string
 }
 
 export interface ComplaintListResponse {
@@ -50,6 +58,15 @@ export interface ComplaintListResponse {
   page: number
   pageSize: number
   totalPages: number
+}
+
+/**
+ * Preview AI-based complaint classification without creating or modifying database records.
+ */
+export async function classifyComplaintPreview(
+  payload: AIClassifyPayload
+): Promise<AIClassificationResult> {
+  return apiClient.post<AIClassificationResult>('/complaints/classify', payload)
 }
 
 export async function fetchComplaintsApi(params?: Record<string, string | number>): Promise<ComplaintListResponse> {
@@ -63,9 +80,13 @@ export async function fetchComplaintsApi(params?: Record<string, string | number
   return apiClient.get<ComplaintListResponse>(`complaints${query}`)
 }
 
+export const listComplaintsApi = fetchComplaintsApi
+
 export async function fetchComplaintByIdApi(id: string): Promise<Complaint> {
   return apiClient.get<Complaint>(`complaints/${encodeURIComponent(id)}`)
 }
+
+export const getComplaintApi = fetchComplaintByIdApi
 
 export async function createComplaintApi(payload: ComplaintCreatePayload): Promise<Complaint> {
   return apiClient.post<Complaint>('complaints', payload)

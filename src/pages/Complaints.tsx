@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   AlertCircle,
   AlertTriangle,
@@ -17,20 +17,24 @@ import {
   Filter,
   History,
   Info,
+  Loader2,
   Lock,
   Paperclip,
   Plus,
+  RefreshCw,
   RotateCcw,
   Send,
   Shield,
   ShieldAlert,
+  Sparkles,
   Upload,
   User,
   UserCheck,
   UserCog,
   X,
 } from 'lucide-react'
-import type { Bureau, CaseDocument, Complaint, Priority, ReassignmentRequest, Role, Status, UserProfile } from '../types'
+import type { Bureau, CaseDocument, Complaint, Priority, ReassignmentRequest, Role, Status, UserProfile, AIClassificationResult } from '../types'
+import { classifyComplaintPreview, createComplaintApi } from '../api/complaints'
 import {
   BUREAUS,
   BUREAU_INFO,
@@ -392,6 +396,14 @@ export function SubmitComplaint({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
 
+  // AI Classification Preview State
+  const [aiResult, setAiResult] = useState<AIClassificationResult | null>(null)
+  const [isAiLoading, setIsAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiApplied, setAiApplied] = useState(false)
+  const [aiDismissed, setAiDismissed] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
   // Document upload state
   const [attachedFiles, setAttachedFiles] = useState<CaseDocument[]>([])
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -403,6 +415,68 @@ export function SubmitComplaint({
 
   // Submission result state
   const [submittedCase, setSubmittedCase] = useState<Complaint | null>(null)
+
+  // Trigger AI Classification Preview
+  const triggerAiClassification = async (force: boolean = false) => {
+    const cleanTitle = title.trim()
+    const cleanDesc = description.trim()
+
+    if (cleanTitle.length < 10 || cleanDesc.length < 20) {
+      if (force) {
+        setAiError('Please enter at least 10 characters in the subject and 20 in the description to run AI classification.')
+      }
+      return
+    }
+
+    setIsAiLoading(true)
+    setAiError(null)
+    setAiDismissed(false)
+
+    try {
+      const res = await classifyComplaintPreview({
+        title: cleanTitle,
+        description: cleanDesc,
+      })
+      if (res && res.status === 'success') {
+        setAiResult(res)
+        setAiApplied(false)
+      } else if (res && res.status === 'invalid_input') {
+        setAiResult(null)
+        setAiError('Input text was insufficient for classification.')
+      } else {
+        setAiResult(res)
+      }
+    } catch (err) {
+      console.warn('AI preview endpoint unavailable:', err)
+      setAiError('AI classification service is temporarily offline or unreachable. You can continue selecting category and bureau manually.')
+    } finally {
+      setIsAiLoading(false)
+    }
+  }
+
+  // Debounced auto-trigger when user finishes typing sufficient title & description
+  useEffect(() => {
+    if (aiDismissed) return
+    const cleanTitle = title.trim()
+    const cleanDesc = description.trim()
+    if (cleanTitle.length < 10 || cleanDesc.length < 30) {
+      return
+    }
+
+    const timer = setTimeout(() => {
+      triggerAiClassification(false)
+    }, 900)
+
+    return () => clearTimeout(timer)
+  }, [title, description])
+
+  const handleApplyAi = () => {
+    if (!aiResult) return
+    if (aiResult.category) setCategory(aiResult.category)
+    if (aiResult.bureau) setBureau(aiResult.bureau)
+    if (aiResult.priority) setPriority(aiResult.priority)
+    setAiApplied(true)
+  }
 
   // Handle Permanent ID lookup
   const handleSelectInstitution = (instId: string) => {
@@ -512,7 +586,7 @@ export function SubmitComplaint({
   }
 
   // Form submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!title.trim() || title.trim().length < 10) {
@@ -529,6 +603,7 @@ export function SubmitComplaint({
       return
     }
     setFormError(null)
+    setIsSubmitting(true)
 
     // Generate unique Case ID ensuring collision avoidance
     const prefix = bureau === 'Approval' ? 'AB' : bureau === 'Academic' ? 'ACD' : bureau
@@ -550,7 +625,7 @@ export function SubmitComplaint({
     const defaultOfficer =
       bureau === 'RB' ? 'Anita Verma' : bureau === 'Approval' ? 'Suresh Patel' : 'Rajesh Kumar'
 
-    const newCase: Complaint = {
+    let newCase: Complaint = {
       id: newCaseId,
       institutionId: selectedInstId,
       institutionPermanentId: permanentIdInput.trim() || institutions[0].aicteId,
@@ -569,6 +644,13 @@ export function SubmitComplaint({
       complainantPhone: complainantPhone.trim(),
       attachmentsCount: attachedFiles.length,
       documents: attachedFiles,
+      aiPredictedCategory: aiResult?.category || undefined,
+      aiPredictedBureau: aiResult?.bureau || undefined,
+      aiPredictedPriority: aiResult?.priority || undefined,
+      aiConfidence: aiResult?.confidence || undefined,
+      aiNeedsManualReview: aiResult?.needsManualReview || false,
+      aiModelVersion: aiResult?.modelVersion || undefined,
+      aiClassificationRun: Boolean(aiResult && aiResult.status === 'success'),
       timeline: [
         {
           label: 'Grievance submitted via AICTE Abhigyan Portal',
@@ -599,6 +681,36 @@ export function SubmitComplaint({
       ],
       nextAction: `Jurisdiction verification and preliminary scrutiny by ${bureau} Cell`,
       lastActionDate: TODAY,
+    }
+
+    try {
+      // Attempt live backend API submission with AI advisory integration
+      const apiResponse = await createComplaintApi({
+        title: title.trim(),
+        description: description.trim(),
+        bureau,
+        category,
+        priority,
+        institutionId: selectedInstId,
+        institutionPermanentId: permanentIdInput.trim() || institutions[0].aicteId,
+        complainantType,
+        complainantName: complainantName.trim() || currentUser?.name || 'Citizen Complainant',
+        complainantEmail: complainantEmail.trim() || currentUser?.email || 'citizen@gov.in',
+        complainantPhone: complainantPhone.trim(),
+      })
+
+      if (apiResponse && apiResponse.id) {
+        newCase = {
+          ...newCase,
+          ...apiResponse,
+          documents: attachedFiles,
+          timeline: (apiResponse.timeline && apiResponse.timeline.length > 0) ? apiResponse.timeline : newCase.timeline,
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Backend API submission skipped or failed, storing locally:', apiErr)
+    } finally {
+      setIsSubmitting(false)
     }
 
     onSubmit(newCase)
@@ -933,7 +1045,230 @@ export function SubmitComplaint({
           />
 
           <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Grievance Subject / Docket Title * (Min. 10 chars)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => triggerAiClassification(true)}
+                  disabled={isAiLoading || title.trim().length < 10 || description.trim().length < 20}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 disabled:opacity-40 transition"
+                  title="Run AI classification prediction on entered text"
+                >
+                  {isAiLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                  <span>Analyze with AI</span>
+                </button>
+              </div>
+              <input
+                type="text"
+                required
+                minLength={10}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Unapproved collection of Rs 35,000 under mandatory development charges"
+                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-medium text-slate-800 focus:border-navy-600 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Detailed Statement of Facts &amp; Allegations * (Min. 30 chars)
+              </label>
+              <textarea
+                required
+                minLength={30}
+                rows={5}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Provide comprehensive details: department, affected batch, specific notice numbers, receipts issued, dates of representation made to management, and relief sought..."
+                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-medium text-slate-800 focus:border-navy-600 focus:outline-none leading-relaxed"
+              />
+            </div>
+
+            {/* AI Grievance Classification Advisory Card */}
+            <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/70 via-slate-50/50 to-teal-50/60 p-4 space-y-3 transition-all">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
+                    <Sparkles size={15} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>AI Classification Assistant</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 font-semibold">
+                        Prototype Advisory
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      TF-IDF &amp; Logistic Regression real-time recommendation
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {aiResult && aiResult.confidence !== null && (
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold font-mono ${
+                        (aiResult.confidence || 0) >= 0.45
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : 'bg-amber-100 text-amber-800 border border-amber-300'
+                      }`}
+                      title="Raw model prediction softmax probability"
+                    >
+                      Confidence: {Math.round((aiResult.confidence || 0) * 100)}%
+                    </span>
+                  )}
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isAiLoading || title.trim().length < 10 || description.trim().length < 20}
+                    onClick={() => triggerAiClassification(true)}
+                    className="text-xs h-7 px-2.5 bg-white hover:bg-indigo-50 border-indigo-300 text-indigo-700"
+                  >
+                    {isAiLoading ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        <span>Analyzing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={12} />
+                        <span>Re-Analyze</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Loading State */}
+              {isAiLoading && (
+                <div className="py-2.5 flex items-center gap-2.5 text-xs text-indigo-700">
+                  <Loader2 size={16} className="animate-spin text-indigo-600 flex-shrink-0" />
+                  <span>Extracting grievance terminology and computing bureau routing recommendations...</span>
+                </div>
+              )}
+
+              {/* Error / Offline Alert */}
+              {aiError && !isAiLoading && (
+                <div className="rounded-lg bg-amber-50/80 p-2.5 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                  <Info size={14} className="text-amber-700 mt-0.5 flex-shrink-0" />
+                  <span className="flex-1">{aiError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAiError(null)}
+                    className="text-amber-700 hover:text-amber-900"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
+
+              {/* AI Prediction Result Content */}
+              {aiResult && !isAiLoading && (
+                <div className="space-y-3 pt-1">
+                  <div className="grid gap-3 sm:grid-cols-3 text-xs">
+                    <div className="rounded-lg bg-white p-2.5 border border-slate-200 shadow-2xs">
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                        Suggested Category
+                      </span>
+                      <span className="font-bold text-slate-900 text-sm mt-0.5 block truncate">
+                        {aiResult.category || 'Undetermined'}
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg bg-white p-2.5 border border-slate-200 shadow-2xs">
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                        Suggested Bureau
+                      </span>
+                      <span className="font-bold text-navy-900 text-sm mt-0.5 block">
+                        {aiResult.bureau ? `${aiResult.bureau} Bureau` : 'Undetermined'}
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg bg-white p-2.5 border border-slate-200 shadow-2xs">
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                        Suggested Priority
+                      </span>
+                      <span className="font-bold text-slate-900 text-sm mt-0.5 block">
+                        {aiResult.priority || 'Medium'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Manual Review Alert */}
+                  {aiResult.needsManualReview && (
+                    <div className="rounded-lg bg-amber-50 p-2.5 border border-amber-300/80 text-xs text-amber-950 flex items-start gap-2">
+                      <AlertTriangle size={15} className="text-amber-700 mt-0.5 flex-shrink-0" />
+                      <div className="space-y-0.5">
+                        <span className="font-bold">Human Scrutiny Recommended:</span>
+                        <span className="text-amber-900 block">
+                          This grievance exhibits multi-bureau overlap or advisory uncertainty ({aiResult.reviewReasons?.join(', ') || 'review required'}). Handling officer will perform manual scrutiny.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Advisory Notice & Apply Actions */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                    <span className="text-[11px] text-slate-500 italic">
+                      {aiResult.advisoryNotice || 'AI output is advisory and does not constitute an official AICTE decision.'}
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant={aiApplied ? 'outline' : 'primary'}
+                        size="sm"
+                        onClick={handleApplyAi}
+                        className={`text-xs h-8 px-3 ${aiApplied ? 'border-emerald-500 text-emerald-700 bg-emerald-50/50' : 'bg-navy-800 text-white'}`}
+                      >
+                        {aiApplied ? (
+                          <>
+                            <CheckCircle2 size={13} className="text-emerald-600" />
+                            <span>Suggestions Applied (Editable Below)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={13} />
+                            <span>Apply AI Suggestions</span>
+                          </>
+                        )}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setAiResult(null)
+                          setAiDismissed(true)
+                        }}
+                        className="text-xs text-slate-500 hover:text-slate-700 h-8"
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Empty/Short Input Helper */}
+              {!aiResult && !isAiLoading && !aiError && (
+                <div className="text-[11px] text-slate-500 flex items-center gap-1.5 py-1">
+                  <Info size={13} className="text-indigo-500 flex-shrink-0" />
+                  <span>
+                    Type at least 10 characters in the subject and 20 in the description to view real-time Bureau and Category AI recommendations.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Manual Category, Bureau, Priority Dropdowns (Always editable/overrideable) */}
+            <div className="grid gap-4 sm:grid-cols-3 pt-1">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Grievance Category *
@@ -944,12 +1279,14 @@ export function SubmitComplaint({
                   className="w-full rounded-lg border border-slate-300 p-2 text-xs font-medium text-slate-800 focus:border-navy-600 focus:outline-none"
                 >
                   <option value="Fee Regulation">Fee Regulation &amp; Unauthorised Charges</option>
-                  <option value="Harassment & Ragging">Anti-Ragging &amp; Student Safety</option>
+                  <option value="Faculty Norms">Faculty Norms &amp; Shortage</option>
                   <option value="Infrastructure">Infrastructure Deficit &amp; Safety</option>
-                  <option value="Unapproved Courses">Unapproved Courses &amp; Bogus Programs</option>
-                  <option value="Faculty Shortage">Faculty Shortage &amp; Cadre Ratio</option>
                   <option value="Admission Irregularity">Admission &amp; Counseling Irregularities</option>
-                  <option value="Skill Certification">NEAT / Apprenticeship Stipend Deduction</option>
+                  <option value="Certificate Delay">Certificate &amp; Transcript Delay</option>
+                  <option value="Curriculum">Curriculum &amp; Examination Irregularities</option>
+                  <option value="Unapproved Courses">Unapproved Courses &amp; Bogus Programs</option>
+                  <option value="Harassment & Ragging">Anti-Ragging &amp; Student Safety</option>
+                  <option value="Skill Certification">Skill Certification &amp; Stipend Schemes</option>
                 </select>
               </div>
 
@@ -985,36 +1322,6 @@ export function SubmitComplaint({
                   <option value="Low">Low (21-Day Routine Window)</option>
                 </select>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Grievance Subject / Docket Title * (Min. 10 chars)
-              </label>
-              <input
-                type="text"
-                required
-                minLength={10}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Unapproved collection of Rs 35,000 under mandatory development charges"
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-medium text-slate-800 focus:border-navy-600 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Detailed Statement of Facts &amp; Allegations * (Min. 30 chars)
-              </label>
-              <textarea
-                required
-                minLength={30}
-                rows={5}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Provide comprehensive details: department, affected batch, specific notice numbers, receipts issued, dates of representation made to management, and relief sought..."
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-medium text-slate-800 focus:border-navy-600 focus:outline-none leading-relaxed"
-              />
             </div>
           </div>
         </Card>
@@ -1131,12 +1438,21 @@ export function SubmitComplaint({
 
         {/* Submit Actions Bar */}
         <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
-          <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+          <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" size="sm" className="px-6">
-            <FilePlus size={14} />
-            <span>Submit Official Grievance</span>
+          <Button type="submit" variant="primary" size="sm" className="px-6" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                <span>Registering Docket...</span>
+              </>
+            ) : (
+              <>
+                <FilePlus size={14} />
+                <span>Submit Official Grievance</span>
+              </>
+            )}
           </Button>
         </div>
       </form>
@@ -1556,6 +1872,53 @@ export function DetailsPage({
               </span>
             </div>
           </Card>
+
+          {/* AI Advisory Audit Box (if AI classification was executed) */}
+          {(c.aiClassificationRun || c.aiPredictedCategory) && (
+            <Card className="border-l-4 border-l-indigo-600 bg-indigo-50/30 p-4">
+              <div className="flex items-start gap-3">
+                <Sparkles size={18} className="text-indigo-600 mt-0.5 flex-shrink-0" />
+                <div className="space-y-1.5 text-xs text-slate-800 w-full">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                      AI Classification Advisory
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 font-semibold">
+                        {c.aiModelVersion || 'prototype-v1.0.0'}
+                      </span>
+                    </span>
+                    {c.aiConfidence !== undefined && c.aiConfidence !== null && (
+                      <span className="font-mono text-indigo-800 font-bold bg-white px-2 py-0.5 rounded border border-indigo-200 text-xs">
+                        Confidence: {Math.round(c.aiConfidence * 100)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3 pt-1 text-slate-700">
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">Predicted Category:</span>
+                      <span className="font-semibold text-slate-900">{c.aiPredictedCategory || c.category}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">Suggested Bureau:</span>
+                      <span className="font-semibold text-navy-900">{c.aiPredictedBureau || c.bureau} Bureau</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">Suggested Priority:</span>
+                      <span className="font-semibold text-slate-900">{c.aiPredictedPriority || c.priority}</span>
+                    </div>
+                  </div>
+                  {c.aiNeedsManualReview && (
+                    <div className="mt-2 rounded bg-amber-50 p-2 border border-amber-200 text-amber-900 flex items-center gap-1.5 text-[11px]">
+                      <AlertTriangle size={13} className="text-amber-700 flex-shrink-0" />
+                      <span>Human verification flag: manual officer review recommended before final closure.</span>
+                    </div>
+                  )}
+                  <div className="text-[10px] text-slate-400 italic pt-1">
+                    AI classification outputs are advisory recommendations and do not supersede human administrative determinations.
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Document Repository & Verification Exhibits */}
           <Card>

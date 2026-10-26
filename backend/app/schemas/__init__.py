@@ -7,6 +7,8 @@ from app.schemas.complaint import (
     ComplaintListResponse,
     ComplaintStatusUpdate,
     ComplaintAssignmentUpdate,
+    ComplaintClassifyRequest,
+    ComplaintClassifyResponse,
 )
 from app.schemas.timeline import TimelineEventBase, TimelineEventCreate, TimelineEventRead
 from app.schemas.auth import LoginRequest, DemoLoginRequest, TokenResponse

@@ -92,6 +92,34 @@ export interface Complaint {
   remarks?: string
   nextAction?: string
   lastActionDate?: string
+
+  // AI Classification Advisory Metadata
+  aiPredictedCategory?: string
+  aiPredictedBureau?: Bureau
+  aiPredictedPriority?: Priority
+  aiConfidence?: number
+  aiNeedsManualReview?: boolean
+  aiModelVersion?: string
+  aiClassificationRun?: boolean
+}
+
+export interface AIClassificationResult {
+  category: string | null
+  bureau: Bureau | null
+  priority: Priority | null
+  confidence: number | null
+  priorityConfidence?: number | null
+  needsManualReview: boolean
+  modelVersion: string | null
+  advisoryNotice: string
+  status: 'success' | 'unavailable' | 'invalid_input' | 'error'
+  reviewReasons: string[]
+}
+
+export interface AIClassifyPayload {
+  title: string
+  description: string
+  confidenceThreshold?: number
 }
 
 export interface Institution {

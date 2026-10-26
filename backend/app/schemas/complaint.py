@@ -81,7 +81,37 @@ class ComplaintRead(ComplaintBase):
     updatedAt: Optional[datetime] = Field(None, alias="updatedAt")
     timeline: List[TimelineEventRead] = Field(default_factory=list, description="Chronological audit history events")
 
+    # AI Classification Advisory Metadata
+    aiPredictedCategory: Optional[str] = Field(None, alias="aiPredictedCategory")
+    aiPredictedBureau: Optional[str] = Field(None, alias="aiPredictedBureau")
+    aiPredictedPriority: Optional[str] = Field(None, alias="aiPredictedPriority")
+    aiConfidence: Optional[float] = Field(None, alias="aiConfidence")
+    aiNeedsManualReview: Optional[bool] = Field(None, alias="aiNeedsManualReview")
+    aiModelVersion: Optional[str] = Field(None, alias="aiModelVersion")
+    aiClassificationRun: Optional[bool] = Field(None, alias="aiClassificationRun")
+
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+class ComplaintClassifyRequest(BaseModel):
+    title: str = Field(..., description="Subject or brief summary of the grievance")
+    description: str = Field(..., description="Detailed narrative of the complaint")
+    confidenceThreshold: Optional[float] = Field(None, alias="confidenceThreshold", description="Optional custom minimum confidence threshold")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+class ComplaintClassifyResponse(BaseModel):
+    category: Optional[str] = Field(None, description="Predicted complaint category")
+    bureau: Optional[str] = Field(None, description="Suggested bureau/cell")
+    priority: Optional[str] = Field(None, description="Suggested priority")
+    confidence: Optional[float] = Field(None, description="Category model confidence score (0.0 to 1.0)")
+    priorityConfidence: Optional[float] = Field(None, alias="priorityConfidence", description="Priority model confidence score")
+    needsManualReview: bool = Field(..., alias="needsManualReview", description="Whether human officer review is recommended")
+    modelVersion: Optional[str] = Field(None, alias="modelVersion", description="Version of the prototype model")
+    advisoryNotice: str = Field(..., alias="advisoryNotice", description="Advisory AI disclaimer")
+    status: str = Field(default="success", description="Status of classification: success, unavailable, invalid_input, error")
+    reviewReasons: List[str] = Field(default_factory=list, alias="reviewReasons", description="Reasons for manual review recommendation")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 class ComplaintStatusUpdate(BaseModel):
     status: str = Field(..., description="Target status: Pending, In Progress, Resolved, Escalated")

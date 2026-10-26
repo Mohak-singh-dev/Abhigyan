@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 
@@ -30,6 +30,15 @@ class Complaint(Base):
     remarks = Column(Text, nullable=True)
     next_action = Column(String(255), nullable=True)
     last_action_date = Column(String(50), nullable=True)
+
+    # AI Classification Advisory Metadata
+    ai_predicted_category = Column(String(255), nullable=True)
+    ai_predicted_bureau = Column(String(50), nullable=True)
+    ai_predicted_priority = Column(String(50), nullable=True)
+    ai_confidence = Column(Float, nullable=True)
+    ai_needs_manual_review = Column(Boolean, nullable=True, default=False)
+    ai_model_version = Column(String(50), nullable=True)
+    ai_classification_run = Column(Boolean, nullable=True, default=False)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
