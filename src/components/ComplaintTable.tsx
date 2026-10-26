@@ -8,6 +8,7 @@ import {
   Clock,
   ExternalLink,
   Eye,
+  Sparkles,
   User,
 } from 'lucide-react'
 import type { Complaint, Role, Status, UserProfile } from '../types'
@@ -206,8 +207,16 @@ export default function ComplaintTable({
                 {!compact && (
                   <td className="px-4 py-3 max-w-[240px]">
                     <div className="font-medium text-slate-800 line-clamp-1">{c.title}</div>
-                    <div className="text-xs text-slate-500 font-normal truncate mt-0.5">
-                      {c.category} • by {c.complainantType || 'Student'}
+                    <div className="text-xs text-slate-500 font-normal truncate mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <span>{c.category} • by {c.complainantType || 'Student'}</span>
+                      {c.aiClassificationRun && (
+                        <span
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-semibold"
+                          title={`AI Prediction: ${c.aiPredictedCategory || c.category} (${Math.round((c.aiConfidence || 0) * 100)}% conf)`}
+                        >
+                          <Sparkles size={9} /> AI: {Math.round((c.aiConfidence || 0) * 100)}%
+                        </span>
+                      )}
                     </div>
                   </td>
                 )}

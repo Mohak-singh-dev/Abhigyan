@@ -1,10 +1,13 @@
+import logging
 import math
 import random
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+
+status = http_status
 
 from app.database import get_db
 from app.models.complaint import Complaint
@@ -17,9 +20,14 @@ from app.schemas.complaint import (
     ComplaintListResponse,
     ComplaintStatusUpdate,
     ComplaintAssignmentUpdate,
+    ComplaintClassifyRequest,
+    ComplaintClassifyResponse,
 )
 from app.schemas.timeline import TimelineEventRead
 from app.auth import get_current_user, check_case_access
+from app.services.ai_classifier import classify_complaint
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
 
@@ -105,6 +113,13 @@ def map_complaint_to_read(c: Complaint) -> ComplaintRead:
         createdAt=c.created_at,
         updatedAt=c.updated_at,
         timeline=timeline_items,
+        aiPredictedCategory=getattr(c, "ai_predicted_category", None),
+        aiPredictedBureau=getattr(c, "ai_predicted_bureau", None),
+        aiPredictedPriority=getattr(c, "ai_predicted_priority", None),
+        aiConfidence=getattr(c, "ai_confidence", None),
+        aiNeedsManualReview=getattr(c, "ai_needs_manual_review", None),
+        aiModelVersion=getattr(c, "ai_model_version", None),
+        aiClassificationRun=getattr(c, "ai_classification_run", None),
     )
 
 @router.post("", response_model=ComplaintRead, status_code=status.HTTP_201_CREATED)
@@ -185,6 +200,32 @@ def create_complaint(
     next_action_val = complaint_in.nextAction.strip() if complaint_in.nextAction and complaint_in.nextAction.strip() else get_default_next_action(status_val, complaint_in.bureau)
     last_action_date_val = complaint_in.lastActionDate.strip() if complaint_in.lastActionDate and complaint_in.lastActionDate.strip() else date_val
 
+    # 7b. Server-side AI classification advisory (runs quietly; never overrides user input)
+    ai_predicted_cat = None
+    ai_predicted_bur = None
+    ai_predicted_prio = None
+    ai_conf = None
+    ai_needs_review = False
+    ai_version = None
+    ai_run = False
+
+    try:
+        ai_res = classify_complaint(complaint_in.title, complaint_in.description)
+        if ai_res and ai_res.get("status") == "success":
+            ai_predicted_cat = ai_res.get("category")
+            ai_predicted_bur = ai_res.get("bureau")
+            ai_predicted_prio = ai_res.get("priority")
+            ai_conf = ai_res.get("confidence")
+            ai_needs_review = bool(ai_res.get("needs_manual_review", False))
+            ai_version = ai_res.get("model_version")
+            ai_run = True
+        elif ai_res and ai_res.get("status") in ("unavailable", "error"):
+            ai_needs_review = True
+            ai_version = ai_res.get("model_version")
+    except Exception as e:
+        logger.warning(f"AI classifier exception during complaint creation: {e}", exc_info=True)
+        ai_needs_review = True
+
     # 8. Instantiate and save model along with initial timeline events in one transaction
     new_complaint = Complaint(
         id=case_id,
@@ -207,6 +248,13 @@ def create_complaint(
         remarks=complaint_in.remarks.strip() if complaint_in.remarks else None,
         next_action=next_action_val,
         last_action_date=last_action_date_val,
+        ai_predicted_category=ai_predicted_cat,
+        ai_predicted_bureau=ai_predicted_bur,
+        ai_predicted_priority=ai_predicted_prio,
+        ai_confidence=ai_conf,
+        ai_needs_manual_review=ai_needs_review,
+        ai_model_version=ai_version,
+        ai_classification_run=ai_run,
     )
 
     try:
@@ -283,7 +331,7 @@ def list_complaints(
         if current_user.bureau != "All":
             if bureau and bureau.strip() and bureau.lower() != "all" and bureau.strip().upper() != current_user.bureau.upper():
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                    status_code=http_status.HTTP_403_FORBIDDEN,
                     detail=f"Restricted: Bureau Admin jurisdiction is {current_user.bureau}; cannot query {bureau} Bureau."
                 )
             query = query.filter(Complaint.bureau.ilike(current_user.bureau))
@@ -340,6 +388,69 @@ def list_complaints(
         page=page,
         pageSize=pageSize,
         totalPages=total_pages
+    )
+
+@router.post("/classify", response_model=ComplaintClassifyResponse)
+def preview_classify_complaint(
+    payload: ComplaintClassifyRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate AI-based complaint classification advisory predictions without persisting to the database.
+    Returns predicted category, suggested bureau, priority, model confidence, and manual review recommendation.
+    Does not modify any complaints or system state.
+    """
+    threshold = payload.confidenceThreshold
+    kwargs = {}
+    if threshold is not None:
+        kwargs["confidence_threshold"] = threshold
+
+    try:
+        result = classify_complaint(
+            title=payload.title,
+            description=payload.description,
+            **kwargs
+        )
+    except Exception as e:
+        logger.error(f"Classification preview error: {e}", exc_info=True)
+        return ComplaintClassifyResponse(
+            category=None,
+            bureau=None,
+            priority=None,
+            confidence=0.0,
+            priorityConfidence=0.0,
+            needsManualReview=True,
+            modelVersion="error",
+            advisoryNotice="AI classification is advisory only.",
+            status="error",
+            reviewReasons=[f"inference_exception: {str(e)}"],
+        )
+
+    if not result:
+        return ComplaintClassifyResponse(
+            category=None,
+            bureau=None,
+            priority=None,
+            confidence=0.0,
+            priorityConfidence=0.0,
+            needsManualReview=True,
+            modelVersion="unavailable",
+            advisoryNotice="AI classification is advisory only.",
+            status="unavailable",
+            reviewReasons=["model_service_unavailable"],
+        )
+
+    return ComplaintClassifyResponse(
+        category=result.get("category"),
+        bureau=result.get("bureau"),
+        priority=result.get("priority"),
+        confidence=result.get("confidence"),
+        priorityConfidence=result.get("priority_confidence"),
+        needsManualReview=bool(result.get("needs_manual_review", False)),
+        modelVersion=result.get("model_version"),
+        advisoryNotice=result.get("advisory_notice", "AI classification is advisory only."),
+        status=result.get("status", "success"),
+        reviewReasons=result.get("review_reasons", []),
     )
 
 @router.get("/{id}", response_model=ComplaintRead)

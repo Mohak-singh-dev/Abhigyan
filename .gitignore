@@ -36,3 +36,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.pytest_cache/
+
+# ML Artifacts
+backend/ml/artifacts/*.joblib
+backend/ml/artifacts/*.json
+!backend/ml/artifacts/.gitkeep
+
+.env.txt
