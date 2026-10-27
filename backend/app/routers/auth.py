@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,11 +9,12 @@ from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.models.complaint import Complaint
-from app.schemas.auth import LoginRequest, DemoLoginRequest, TokenResponse
+from app.schemas.auth import LoginRequest, DemoLoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserProfileRead
 from app.auth import (
     create_access_token,
     verify_password,
+    hash_password,
     get_current_user,
 )
 
@@ -92,6 +94,69 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         user=get_user_profile_read(user, db),
     )
 
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    """
+    Public registration endpoint for Complainants (citizens/students/faculty/parents).
+    The server strictly forces role="Complainant", status="Active", and bureau="All".
+    Client-supplied role or bureau fields are never accepted, preventing privilege escalation.
+    Hashes password via bcrypt and returns a signed JWT token and user profile for immediate login.
+    """
+    email_clean = payload.email.strip().lower()
+    existing = db.query(User).filter(func.lower(User.email) == email_clean).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An account with email '{email_clean}' is already registered.",
+        )
+
+    # Compute avatar initials from name
+    name_parts = payload.name.strip().split()
+    if len(name_parts) >= 2:
+        avatar_text = (name_parts[0][0] + name_parts[-1][0]).upper()
+    elif len(name_parts) == 1 and len(name_parts[0]) >= 2:
+        avatar_text = name_parts[0][:2].upper()
+    else:
+        avatar_text = "CP"
+
+    user_id = f"c-{uuid.uuid4().hex[:12]}"
+    complainant_type = payload.complainantType or "General Public"
+
+    new_user = User(
+        id=user_id,
+        name=payload.name.strip(),
+        email=email_clean,
+        role="Complainant",  # Strictly server-assigned
+        designation=f"{complainant_type} Complainant",
+        bureau="All",
+        avatar_text=avatar_text,
+        phone=payload.phone.strip() if payload.phone else "",
+        status="Active",
+        department="Complainant / Citizen Portal",
+        password_hash=hash_password(payload.password),
+    )
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    token_claims = {
+        "sub": new_user.id,
+        "email": new_user.email,
+        "role": new_user.role,
+        "bureau": new_user.bureau,
+        "name": new_user.name,
+    }
+    access_token = create_access_token(data=token_claims, expires_delta=expires_delta)
+
+    return TokenResponse(
+        accessToken=access_token,
+        tokenType="bearer",
+        expiresIn=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=get_user_profile_read(new_user, db),
+    )
+
 @router.post("/demo-login", response_model=TokenResponse)
 def demo_login(payload: DemoLoginRequest, db: Session = Depends(get_db)):
     """
@@ -115,8 +180,14 @@ def demo_login(payload: DemoLoginRequest, db: Session = Depends(get_db)):
         target_role = payload.role.strip()
         user = db.query(User).filter(
             User.role.ilike(target_role),
-            User.status == "Active"
+            User.status == "Active",
+            User.id.like("u%")
         ).order_by(User.id.asc()).first()
+        if not user:
+            user = db.query(User).filter(
+                User.role.ilike(target_role),
+                User.status == "Active"
+            ).order_by(User.id.asc()).first()
     else:
         # Default to primary admin profile if no specific user requested
         user = db.query(User).filter(User.role == "Admin", User.status == "Active").first()

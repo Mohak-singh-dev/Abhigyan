@@ -124,13 +124,17 @@ def check_case_access(user: User, complaint: Complaint, action: str = "view") ->
     Supported actions: 'view', 'update_status', 'assign', 'add_remark'.
     Raises HTTPException(403) on unauthorized attempts.
     """
-    # 1. Complainant role enforcement: Must match authenticated complainant email
+    # 1. Complainant role enforcement: Must match authenticated complainant user ID or email
     if user.role == "Complainant":
-        user_email_match = (
+        user_id_match = bool(
+            getattr(complaint, "complainant_user_id", None)
+            and complaint.complainant_user_id == user.id
+        )
+        user_email_match = bool(
             complaint.complainant_email
             and complaint.complainant_email.strip().lower() == user.email.strip().lower()
         )
-        if not user_email_match:
+        if not (user_id_match or user_email_match):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access forbidden: Complainants are only authorized to access complaints submitted by themselves.",

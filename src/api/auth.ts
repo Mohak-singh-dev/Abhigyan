@@ -23,6 +23,14 @@ export interface DemoLoginPayload {
   role?: string
 }
 
+export interface RegisterPayload {
+  name: string
+  email: string
+  password: string
+  phone?: string
+  complainantType?: string
+}
+
 export interface TokenResponse {
   accessToken: string
   tokenType: string
@@ -35,6 +43,23 @@ export interface TokenResponse {
  */
 export async function loginApi(payload: LoginPayload): Promise<TokenResponse> {
   const response = await apiClient.post<TokenResponse>('auth/login', payload)
+  if (response?.accessToken) {
+    setAuthToken(response.accessToken)
+    try {
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(response.user))
+    } catch {
+      // ignore storage failure
+    }
+  }
+  return response
+}
+
+/**
+ * Register a new citizen/complainant account via POST /api/auth/register.
+ * Always assigns Complainant role and logs in the user immediately upon creation.
+ */
+export async function registerApi(payload: RegisterPayload): Promise<TokenResponse> {
+  const response = await apiClient.post<TokenResponse>('auth/register', payload)
   if (response?.accessToken) {
     setAuthToken(response.accessToken)
     try {

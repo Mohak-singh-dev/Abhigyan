@@ -12,6 +12,7 @@ from app.auth import (
     hash_password,
     create_access_token,
     get_current_user,
+    verify_password,
 )
 
 # Test mock data
@@ -143,6 +144,7 @@ SAMPLE_COMPLAINT_PGRC = Complaint(
     complainant_type="Student",
     complainant_name="Rohit Sharma",
     complainant_email="rohit.sharma@student.edu.in",
+    complainant_user_id="u0",
     remarks=None,
     next_action="Examine counter affidavit",
     last_action_date="2026-10-05",
@@ -222,6 +224,16 @@ SAMPLE_COMPLAINT_PGRC_UNASSIGNED = Complaint(
     updated_at=datetime(2026, 10, 5, 10, 0, 0),
 )
 
+TEST_INSTITUTION = Institution(
+    id="i1",
+    aicte_id="1-4821039",
+    name="Delhi Institute of Advanced Technology",
+    state="Delhi",
+    city="New Delhi",
+    type="Engineering & Technology",
+    approved="Yes",
+)
+
 ALL_SAMPLE_COMPLAINTS = [
     SAMPLE_COMPLAINT_PGRC,
     SAMPLE_COMPLAINT_RB,
@@ -230,8 +242,9 @@ ALL_SAMPLE_COMPLAINTS = [
 ]
 
 class MockAuthDBSession:
-    def __init__(self, users=None, complaints=None):
+    def __init__(self, users=None, complaints=None, institutions=None):
         self.users = list(users if users is not None else ALL_TEST_USERS)
+        self.institutions = list(institutions if institutions is not None else [TEST_INSTITUTION])
         if complaints is not None:
             self.complaints = list(complaints)
         else:
@@ -253,6 +266,7 @@ class MockAuthDBSession:
                     complainant_type=c.complainant_type,
                     complainant_name=c.complainant_name,
                     complainant_email=c.complainant_email,
+                    complainant_user_id=getattr(c, "complainant_user_id", None),
                     remarks=c.remarks,
                     next_action=c.next_action,
                     last_action_date=c.last_action_date,
@@ -275,7 +289,7 @@ class MockAuthDBSession:
                 for criterion in criteria:
                     criterion_str = str(criterion).lower()
                     # User filter by id
-                    if "users.id =" in criterion_str or "users.id" in criterion_str and "=" in criterion_str:
+                    if "users.id =" in criterion_str or ("users.id" in criterion_str and "=" in criterion_str):
                         val = getattr(getattr(criterion, "right", None), "value", None)
                         if val is not None:
                             filtered = [u for u in filtered if u.id == str(val)]
@@ -294,6 +308,11 @@ class MockAuthDBSession:
                         val = getattr(getattr(criterion, "right", None), "value", None)
                         if val is not None:
                             filtered = [u for u in filtered if u.name.lower() == str(val).lower()]
+                    # Institution filter by id
+                    elif "institutions.id" in criterion_str:
+                        val = getattr(getattr(criterion, "right", None), "value", None)
+                        if val is not None:
+                            filtered = [i for i in filtered if i.id.lower() == str(val).lower()]
                     # Complaint filter by id
                     elif "complaints.id" in criterion_str:
                         val = getattr(getattr(criterion, "right", None), "value", None)
@@ -304,11 +323,6 @@ class MockAuthDBSession:
                         val = getattr(getattr(criterion, "right", None), "value", None)
                         if val is not None:
                             filtered = [c for c in filtered if c.bureau.lower() == str(val).lower()]
-                    # Complaint filter by complainant_email
-                    elif "complaints.complainant_email" in criterion_str and "complaints.complainant_name" not in criterion_str:
-                        val = getattr(getattr(criterion, "right", None), "value", None)
-                        if val is not None:
-                            filtered = [c for c in filtered if c.complainant_email and c.complainant_email.lower() == str(val).lower()]
                     # Officer filter (OR of officer name and assigned_user_id)
                     elif "complaints.officer" in criterion_str or "complaints.assigned_user_id" in criterion_str:
                         clauses = getattr(criterion, "clauses", [criterion])
@@ -325,10 +339,32 @@ class MockAuthDBSession:
                                     (c.assigned_user_id and c.assigned_user_id.lower() in targets)
                                 )
                             ]
-                    # Complaint filter for Complainant (OR of email and name)
-                    elif "or_" in criterion_str or ("complainant_email" in criterion_str and "complainant_name" in criterion_str):
-                        # Filter to complainant Rohit
-                        filtered = [c for c in filtered if (c.complainant_email and "rohit" in c.complainant_email.lower()) or (c.complainant_name and "rohit" in c.complainant_name.lower())]
+                    # Complaint filter by complainant_email alone
+                    elif "complaints.complainant_email" in criterion_str and "complaints.complainant_user_id" not in criterion_str and "or_" not in criterion_str and "complaints.complainant_name" not in criterion_str:
+                        val = getattr(getattr(criterion, "right", None), "value", None)
+                        if val is not None:
+                            filtered = [c for c in filtered if c.complainant_email and c.complainant_email.lower() == str(val).lower()]
+                    # Complaint filter for Complainant (OR of complainant_user_id and complainant_email)
+                    elif "complainant_user_id" in criterion_str or "complainant_email" in criterion_str or "or_" in criterion_str:
+                        user_id_val = None
+                        email_val = None
+                        clauses = getattr(criterion, "clauses", [criterion])
+                        for cl in clauses:
+                            left_name = str(getattr(cl, "left", "")).lower()
+                            val = getattr(getattr(cl, "right", None), "value", None)
+                            if val:
+                                if "user_id" in left_name:
+                                    user_id_val = str(val).strip().lower()
+                                elif "email" in left_name:
+                                    email_val = str(val).strip().lower()
+                        if user_id_val or email_val:
+                            filtered = [
+                                c for c in filtered
+                                if (user_id_val and getattr(c, "complainant_user_id", None) and str(c.complainant_user_id).lower() == user_id_val)
+                                or (email_val and getattr(c, "complainant_email", None) and str(c.complainant_email).lower() == email_val)
+                            ]
+                        else:
+                            filtered = [c for c in filtered if (c.complainant_email and "rohit" in c.complainant_email.lower()) or (c.complainant_name and "rohit" in c.complainant_name.lower())]
                 return MockQuery(filtered)
 
             def order_by(self, *args):
@@ -359,7 +395,7 @@ class MockAuthDBSession:
         elif model is ComplaintTimeline:
             return MockQuery(self.timelines)
         elif model is Institution:
-            return MockQuery([])
+            return MockQuery(self.institutions)
         return MockQuery([0])
 
     def add(self, item):
@@ -921,4 +957,323 @@ def test_officer_and_bureau_admin_assignment_authorization_rules(client: TestCli
     )
     assert res_valid.status_code == 200
     assert res_valid.json()["officer"] == USER_OFFICER_PGRC.name
+
+
+# --- 13. Phase 1 Complainant Registration & Ownership Tests ---
+
+def test_registration_success(client: TestClient, auth_mock_db):
+    """
+    Test public registration succeeds with valid payload:
+    - Returns 201 Created with JWT accessToken and tokenType="bearer"
+    - User has role='Complainant', bureau='All', status='Active'
+    - User is persisted in database with a generated ID starting with 'c-'
+    """
+    payload = {
+        "name": "Pooja Sharma",
+        "email": "pooja.sharma@example.com",
+        "password": "ValidSecurePassword@2026",
+        "phone": "+91 98765 11111",
+        "complainantType": "Student",
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert "accessToken" in data
+    assert data["tokenType"] == "bearer"
+    user_data = data["user"]
+    assert user_data["name"] == "Pooja Sharma"
+    assert user_data["email"] == "pooja.sharma@example.com"
+    assert user_data["role"] == "Complainant"
+    assert user_data["bureau"] == "All"
+    assert user_data["status"] == "Active"
+    assert user_data["id"].startswith("c-")
+
+    # Confirm user is in database
+    db_user = [u for u in auth_mock_db.users if u.email == "pooja.sharma@example.com"]
+    assert len(db_user) == 1
+    assert db_user[0].role == "Complainant"
+
+
+def test_registration_duplicate_email(client: TestClient, auth_mock_db):
+    """
+    Test registration rejects duplicate email with 409 Conflict.
+    """
+    payload = {
+        "name": "Another Rohit",
+        "email": "rohit.sharma@student.edu.in",  # already exists in seed/mock users
+        "password": "Password123!",
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 409
+    assert "already registered" in response.json()["detail"].lower()
+
+
+def test_registration_invalid_input(client: TestClient, auth_mock_db):
+    """
+    Test registration rejects invalid email, short name, and short password with 422.
+    """
+    # 1. Invalid email
+    res1 = client.post("/api/auth/register", json={
+        "name": "Valid Name",
+        "email": "not-an-email",
+        "password": "ValidPassword123!",
+    })
+    assert res1.status_code == 422
+
+    # 2. Short name (<2 chars)
+    res2 = client.post("/api/auth/register", json={
+        "name": "X",
+        "email": "valid@example.com",
+        "password": "ValidPassword123!",
+    })
+    assert res2.status_code == 422
+
+    # 3. Short password (<6 chars)
+    res3 = client.post("/api/auth/register", json={
+        "name": "Valid Name",
+        "email": "valid@example.com",
+        "password": "123",
+    })
+    assert res3.status_code == 422
+
+    # 4. Invalid complainantType
+    res4 = client.post("/api/auth/register", json={
+        "name": "Valid Name",
+        "email": "valid@example.com",
+        "password": "ValidPassword123!",
+        "complainantType": "IllegalType",
+    })
+    assert res4.status_code == 422
+    assert "complainanttype" in res4.text.lower()
+
+
+def test_registration_valid_and_invalid_complainant_types(client: TestClient, auth_mock_db):
+    """
+    Test registration strictly validates complainantType:
+    - Accepts each supported type: Student, Faculty, Parent, Whistleblower, General Public
+    - Normalizes case-insensitively and sets appropriate designation
+    - Defaults to 'General Public' when omitted
+    - Rejects unsupported types (e.g. 'Admin', 'Officer', 'Arbitrary') with 422
+    """
+    supported_types = ["Student", "Faculty", "Parent", "Whistleblower", "General Public"]
+    for i, c_type in enumerate(supported_types):
+        res = client.post("/api/auth/register", json={
+            "name": f"Valid Type User {i}",
+            "email": f"type_user_{i}@example.com",
+            "password": "ValidPassword123!",
+            "complainantType": c_type,
+        })
+        assert res.status_code == 201, f"Failed for supported complainantType: {c_type}"
+        data = res.json()
+        assert data["user"]["designation"] == f"{c_type} Complainant"
+
+    # Default when complainantType is omitted
+    res_default = client.post("/api/auth/register", json={
+        "name": "Omitted Type User",
+        "email": "omitted_type@example.com",
+        "password": "ValidPassword123!",
+    })
+    assert res_default.status_code == 201
+    assert res_default.json()["user"]["designation"] == "General Public Complainant"
+
+    # Invalid complainant types should be rejected with 422
+    for invalid_type in ["Admin", "Officer", "Hacker", "Corporation"]:
+        res_inv = client.post("/api/auth/register", json={
+            "name": "Invalid Type User",
+            "email": f"inv_{invalid_type.lower()}@example.com",
+            "password": "ValidPassword123!",
+            "complainantType": invalid_type,
+        })
+        assert res_inv.status_code == 422
+
+
+def test_registration_password_hashing(client: TestClient, auth_mock_db):
+    """
+    Test registered user's password is encrypted with secure bcrypt hash, not stored in plaintext.
+    """
+    raw_pass = "MySecretPass@999"
+    payload = {
+        "name": "Hash Check User",
+        "email": "hashcheck@example.com",
+        "password": raw_pass,
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 201
+
+    db_user = [u for u in auth_mock_db.users if u.email == "hashcheck@example.com"][0]
+    assert db_user.password_hash != raw_pass
+    assert db_user.password_hash.startswith("$2b$") or db_user.password_hash.startswith("$2a$")
+    assert verify_password(raw_pass, db_user.password_hash) is True
+
+
+def test_registration_privilege_escalation_attempt(client: TestClient, auth_mock_db):
+    """
+    Test server-side enforcement: client attempt to register as Admin or specify bureau is ignored.
+    Server MUST assign role='Complainant' and bureau='All'.
+    """
+    malicious_payload = {
+        "name": "Privilege Attacker",
+        "email": "attacker@example.com",
+        "password": "AttackPassword@123",
+        "role": "Admin",
+        "bureau": "RB",
+        "designation": "System Administrator",
+    }
+    response = client.post("/api/auth/register", json=malicious_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["user"]["role"] == "Complainant"
+    assert data["user"]["bureau"] == "All"
+
+    db_user = [u for u in auth_mock_db.users if u.email == "attacker@example.com"][0]
+    assert db_user.role == "Complainant"
+    assert db_user.bureau == "All"
+
+
+def test_login_after_registration(client: TestClient, auth_mock_db):
+    """
+    Test user can register and immediately authenticate via POST /api/auth/login.
+    """
+    reg_payload = {
+        "name": "Auth Flow User",
+        "email": "authflow@example.com",
+        "password": "FlowPassword@2026",
+    }
+    reg_res = client.post("/api/auth/register", json=reg_payload)
+    assert reg_res.status_code == 201
+
+    # Now login with the newly created account
+    login_res = client.post("/api/auth/login", json={
+        "email": "authflow@example.com",
+        "password": "FlowPassword@2026",
+    })
+    assert login_res.status_code == 200
+    login_data = login_res.json()
+    assert login_data["user"]["email"] == "authflow@example.com"
+    assert login_data["user"]["role"] == "Complainant"
+    assert "accessToken" in login_data
+
+
+def test_complaint_ownership_new_record(client: TestClient, auth_mock_db):
+    """
+    Test complaint created by authenticated Complainant:
+    1. complainant_user_id is set to user's database ID.
+    2. Complainant can access their own complaint.
+    3. Another complainant receives 403 Forbidden.
+    4. Admin or assigned officer can access it.
+    """
+    new_complainant = User(
+        id="c-user-99",
+        name="Citizen One",
+        email="citizen.one@example.com",
+        role="Complainant",
+        designation="Citizen",
+        bureau="All",
+        status="Active",
+        password_hash=TEST_HASH,
+    )
+    auth_mock_db.users.append(new_complainant)
+
+    app.dependency_overrides[get_current_user] = lambda: new_complainant
+    try:
+        create_res = client.post("/api/complaints", json={
+            "title": "Unauthorized fee demand by college",
+            "description": "College demanded extra library fee exceeding official norms.",
+            "bureau": "PGRC",
+            "category": "Fee Regulation",
+            "priority": "Medium",
+            "institutionId": "i1",
+            "complainantType": "Student",
+        })
+        assert create_res.status_code == 201
+        case_data = create_res.json()
+        case_id = case_data["id"]
+        assert case_data["complainantUserId"] == "c-user-99"
+        assert case_data["complainantEmail"] == "citizen.one@example.com"
+
+        # 2. Complainant can access it
+        owner_get = client.get(f"/api/complaints/{case_id}")
+        assert owner_get.status_code == 200
+        assert owner_get.json()["id"] == case_id
+
+        # Complainant list includes it
+        owner_list = client.get("/api/complaints")
+        assert owner_list.status_code == 200
+        assert any(c["id"] == case_id for c in owner_list.json()["items"])
+
+        # 3. Another complainant tries to access it -> 403 Forbidden
+        app.dependency_overrides[get_current_user] = lambda: USER_COMPLAINANT  # Rohit Sharma, u0
+        other_get = client.get(f"/api/complaints/{case_id}")
+        assert other_get.status_code == 403
+        assert "access forbidden" in other_get.json()["detail"].lower()
+
+        # Other complainant's list excludes it
+        other_list = client.get("/api/complaints")
+        assert other_list.status_code == 200
+        assert not any(c["id"] == case_id for c in other_list.json()["items"])
+
+        # 4. Admin can access it
+        app.dependency_overrides[get_current_user] = lambda: USER_ADMIN
+        admin_get = client.get(f"/api/complaints/{case_id}")
+        assert admin_get.status_code == 200
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: USER_ADMIN
+
+
+def test_complaint_ownership_legacy_record(client: TestClient, auth_mock_db):
+    """
+    Test backward compatibility for legacy records with complainant_user_id = None:
+    - User with matching complainant_email is granted access.
+    - User with different email receives 403 Forbidden.
+    """
+    legacy_case = Complaint(
+        id="PGRC-2026-LEGACY1",
+        institution_id="i1",
+        institution_permanent_id="1-4821039",
+        bureau="PGRC",
+        category="Fee Regulation",
+        priority="Medium",
+        officer="Rajesh Kumar",
+        assigned_user_id="u2",
+        status="In Progress",
+        date="2026-09-01",
+        due="2026-09-30",
+        title="Legacy complaint before user accounts existed",
+        description="Legacy complaint with no complainant_user_id attached.",
+        complainant_type="Student",
+        complainant_name="Rohit Sharma",
+        complainant_email="rohit.sharma@student.edu.in",
+        complainant_user_id=None,  # Unlinked legacy record
+        created_at=datetime(2026, 9, 1, 10, 0, 0),
+        updated_at=datetime(2026, 9, 1, 10, 0, 0),
+    )
+    auth_mock_db.complaints.append(legacy_case)
+
+    # 1. Complainant with matching email (USER_COMPLAINANT: rohit.sharma@student.edu.in)
+    app.dependency_overrides[get_current_user] = lambda: USER_COMPLAINANT
+    try:
+        match_get = client.get(f"/api/complaints/{legacy_case.id}")
+        assert match_get.status_code == 200
+        assert match_get.json()["id"] == legacy_case.id
+
+        # 2. Complainant with different email (e.g. stranger)
+        stranger_user = User(
+            id="c-stranger-88",
+            name="Stranger User",
+            email="stranger@otherdomain.com",
+            role="Complainant",
+            designation="Citizen",
+            bureau="All",
+            status="Active",
+            password_hash=TEST_HASH,
+        )
+        auth_mock_db.users.append(stranger_user)
+        app.dependency_overrides[get_current_user] = lambda: stranger_user
+
+        stranger_get = client.get(f"/api/complaints/{legacy_case.id}")
+        assert stranger_get.status_code == 403
+        assert "access forbidden" in stranger_get.json()["detail"].lower()
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: USER_ADMIN
+
 

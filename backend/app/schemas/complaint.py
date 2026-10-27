@@ -76,6 +76,7 @@ class ComplaintRead(ComplaintBase):
     date: str
     due: str
     assignedUserId: Optional[str] = Field(None, alias="assignedUserId")
+    complainantUserId: Optional[str] = Field(None, alias="complainantUserId")
     institutionName: Optional[str] = Field(None, alias="institutionName")
     createdAt: Optional[datetime] = Field(None, alias="createdAt")
     updatedAt: Optional[datetime] = Field(None, alias="updatedAt")

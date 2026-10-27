@@ -21,6 +21,7 @@ class Complaint(Base):
     description = Column(Text, nullable=False)
 
     # Complainant metadata
+    complainant_user_id = Column(String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     complainant_type = Column(String(50), nullable=True, default="General Public")
     complainant_name = Column(String(255), nullable=True)
     complainant_email = Column(String(255), nullable=True, index=True)
@@ -46,6 +47,7 @@ class Complaint(Base):
     # Relationships
     institution = relationship("Institution", backref="complaints")
     assigned_user = relationship("User", foreign_keys=[assigned_user_id], backref="assigned_complaints")
+    complainant_user = relationship("User", foreign_keys=[complainant_user_id], backref="filed_complaints")
     timeline_events = relationship(
         "ComplaintTimeline",
         back_populates="complaint",

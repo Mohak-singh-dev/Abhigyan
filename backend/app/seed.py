@@ -557,6 +557,11 @@ def seed_demo_data(db: Session) -> None:
         assigned_user = db.query(User).filter(User.name == item["officer"]).first()
         assigned_user_id = assigned_user.id if assigned_user else None
 
+        # Resolve complainant_user_id
+        comp_email = item.get("complainant_email")
+        comp_user = db.query(User).filter(User.email == comp_email).first() if comp_email else None
+        complainant_user_id = comp_user.id if comp_user else None
+
         if existing:
             existing.institution_id = item["institution_id"]
             existing.institution_permanent_id = item["institution_permanent_id"]
@@ -565,6 +570,7 @@ def seed_demo_data(db: Session) -> None:
             existing.priority = item["priority"]
             existing.officer = item["officer"]
             existing.assigned_user_id = assigned_user_id
+            existing.complainant_user_id = complainant_user_id
             existing.status = item["status"]
             existing.date = item["date"]
             existing.due = item["due"]
@@ -578,6 +584,7 @@ def seed_demo_data(db: Session) -> None:
         else:
             complaint_dict = dict(item)
             complaint_dict["assigned_user_id"] = assigned_user_id
+            complaint_dict["complainant_user_id"] = complainant_user_id
             new_complaint = Complaint(**complaint_dict)
             db.add(new_complaint)
             complaint_count += 1

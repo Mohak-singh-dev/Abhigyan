@@ -425,6 +425,15 @@ export function SubmitComplaint({
   // Submission result state
   const [submittedCase, setSubmittedCase] = useState<Complaint | null>(null)
 
+  // Synchronize prefilled complainant profile whenever authenticated user identity updates
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.name) setComplainantName(currentUser.name)
+      if (currentUser.email) setComplainantEmail(currentUser.email)
+      if (currentUser.phone) setComplainantPhone(currentUser.phone)
+    }
+  }, [currentUser])
+
   // Trigger AI Classification Preview
   const triggerAiClassification = async (force: boolean = false) => {
     const cleanTitle = title.trim()

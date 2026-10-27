@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 status = http_status
 
@@ -115,6 +115,7 @@ def map_complaint_to_read(c: Complaint) -> ComplaintRead:
         status=c.status,
         officer=c.officer,
         assignedUserId=c.assigned_user_id,
+        complainantUserId=getattr(c, "complainant_user_id", None),
         date=c.date,
         due=c.due,
         title=c.title,
@@ -214,11 +215,14 @@ def create_complaint(
         complainant_name = current_user.name
         complainant_email = current_user.email
         complainant_phone = complaint_in.complainantPhone.strip() if complaint_in.complainantPhone and complaint_in.complainantPhone.strip() else (current_user.phone or None)
+        complainant_user_id = current_user.id
         intake_user_id = current_user.id
     else:
         complainant_name = complaint_in.complainantName.strip() if complaint_in.complainantName and complaint_in.complainantName.strip() else current_user.name
         complainant_email = complaint_in.complainantEmail.strip() if complaint_in.complainantEmail and complaint_in.complainantEmail.strip() else current_user.email
         complainant_phone = complaint_in.complainantPhone.strip() if complaint_in.complainantPhone and complaint_in.complainantPhone.strip() else None
+        existing_comp_user = db.query(User).filter(func.lower(User.email) == complainant_email.lower()).first() if complainant_email else None
+        complainant_user_id = existing_comp_user.id if existing_comp_user else None
         intake_user_id = None
 
     # 5. Server-generated Filing Date & Due Date SLA - NEVER trust client
@@ -276,6 +280,7 @@ def create_complaint(
         due=due_val,
         title=complaint_in.title.strip(),
         description=complaint_in.description.strip(),
+        complainant_user_id=complainant_user_id,
         complainant_type=complaint_in.complainantType or "General Public",
         complainant_name=complainant_name,
         complainant_email=complainant_email,
@@ -356,7 +361,12 @@ def list_complaints(
 
     # 1. Role-based scoping
     if current_user.role == "Complainant":
-        query = query.filter(Complaint.complainant_email.ilike(current_user.email.strip()))
+        query = query.filter(
+            or_(
+                Complaint.complainant_user_id == current_user.id,
+                Complaint.complainant_email.ilike(current_user.email.strip()),
+            )
+        )
     elif current_user.role == "BureauAdmin":
         if current_user.bureau != "All":
             if bureau and bureau.strip() and bureau.lower() != "all" and bureau.strip().upper() != current_user.bureau.upper():
