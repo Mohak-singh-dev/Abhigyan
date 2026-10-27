@@ -2,14 +2,15 @@ import os
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+from sqlalchemy.engine import URL, make_url
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 
 class Settings(BaseSettings):
     DATABASE_URL: str = Field(
-        default="postgresql+psycopg2://postgres:postgres@localhost:5432/abhigyan_db",
-        description="PostgreSQL Database Connection URL"
+        default="postgresql://postgres:YOUR-PASSWORD@YOUR-SUPABASE-HOST:5432/postgres?sslmode=require",
+        description="Supabase PostgreSQL connection URL from the project Connect dialog"
     )
     CORS_ORIGINS: str = Field(
         default="http://localhost:5173,http://localhost:4173",
@@ -54,6 +55,19 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore"
     )
+
+    @property
+    def sqlalchemy_database_url(self) -> URL:
+        """Return a SQLAlchemy URL using psycopg2 and encrypted PostgreSQL transport."""
+        url = make_url(self.DATABASE_URL)
+        if url.drivername in {"postgres", "postgresql"}:
+            url = url.set(drivername="postgresql+psycopg2")
+        elif url.drivername != "postgresql+psycopg2":
+            raise ValueError("DATABASE_URL must use PostgreSQL (postgresql:// or postgresql+psycopg2://).")
+
+        query = dict(url.query)
+        query.setdefault("sslmode", "require")
+        return url.set(query=query)
 
     @property
     def cors_origin_list(self) -> List[str]:

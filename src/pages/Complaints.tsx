@@ -710,8 +710,11 @@ export function SubmitComplaint({
       }
       setSubmittedCase(authoritative || newCase)
     } catch (apiErr) {
-      console.warn('Backend API submission skipped or failed, storing locally:', apiErr)
-      setSubmittedCase(newCase)
+      setFormError(
+        apiErr instanceof Error
+          ? apiErr.message
+          : 'The server could not save this complaint. Please try again.'
+      )
     } finally {
       setIsSubmitting(false)
     }

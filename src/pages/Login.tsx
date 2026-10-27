@@ -375,7 +375,7 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
                       isSelected
                         ? `${r.accent} shadow-xs ring-1 ring-slate-400/20`
                         : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
-                    } ${index === 4 ? 'sm:col-span-2' : ''}`}
+                    } ${index === DEMO_ROLES.length - 1 && DEMO_ROLES.length % 2 === 1 ? 'sm:col-span-2 sm:w-1/2 sm:justify-self-center' : ''}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">

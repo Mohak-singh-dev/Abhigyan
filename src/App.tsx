@@ -1367,27 +1367,38 @@ export default function App() {
       return null
     }
 
+    if (!getAuthToken()) {
+      const authNotif: AppNotification = {
+        id: `notif-auth-required-${Date.now()}`,
+        type: 'alert',
+        title: 'Sign In Required',
+        message: 'Your secure session is missing. Sign in again before submitting this complaint.',
+        timestamp: `${TODAY} 11:00`,
+        read: false,
+      }
+      setNotifications((prev) => [authNotif, ...prev])
+      return null
+    }
+
     let complaintToAdd = newComplaint
     try {
-      if (getAuthToken()) {
-        const created = await createComplaintApi({
-          id: newComplaint.id,
-          title: newComplaint.title,
-          description: newComplaint.description,
-          bureau: newComplaint.bureau,
-          category: newComplaint.category,
-          priority: newComplaint.priority,
-          institutionId: newComplaint.institutionId,
-          complainantType: newComplaint.complainantType,
-          complainantName: newComplaint.complainantName,
-          complainantEmail: newComplaint.complainantEmail,
-          complainantPhone: newComplaint.complainantPhone,
-          institutionPermanentId: newComplaint.institutionPermanentId,
-        })
-        if (created) {
-          complaintToAdd = { ...newComplaint, ...created }
-        }
+      const created = await createComplaintApi({
+        title: newComplaint.title,
+        description: newComplaint.description,
+        bureau: newComplaint.bureau,
+        category: newComplaint.category,
+        priority: newComplaint.priority,
+        institutionId: newComplaint.institutionId,
+        complainantType: newComplaint.complainantType,
+        complainantName: newComplaint.complainantName,
+        complainantEmail: newComplaint.complainantEmail,
+        complainantPhone: newComplaint.complainantPhone,
+        institutionPermanentId: newComplaint.institutionPermanentId,
+      })
+      if (!created?.id) {
+        throw new Error('The server did not return a saved complaint record.')
       }
+      complaintToAdd = { ...newComplaint, ...created }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Server rejected complaint creation.'
       const statusSuffix = err instanceof ApiError ? ` (HTTP ${err.status})` : ''

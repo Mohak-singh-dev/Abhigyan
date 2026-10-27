@@ -163,14 +163,16 @@ cd Abhigyan
    pip install -r backend/requirements.txt
    ```
 
-3. Configure environment variables:
-   Copy the example environment file to `backend/.env`:
+3. Configure Supabase and environment variables:
+   - In the Supabase dashboard, open your project and select **Connect**.
+   - Copy the **Session pooler** connection string. It works from IPv4-only local networks; use the exact host, port, and username Supabase provides.
+   - Copy the example environment file to `backend/.env`:
    ```powershell
    Copy-Item backend/.env.example backend/.env
    ```
-   Open `backend/.env` and replace `YOUR_POSTGRES_PASSWORD` with your actual local PostgreSQL `postgres` user password:
+   Open `backend/.env` and set `DATABASE_URL` to the copied connection string. Replace its password placeholder with your Supabase database password. If the password contains reserved URL characters (such as `@`, `:`, `/`, `?`, or `#`), percent-encode them. Keep this file private; it is ignored by Git.
    ```ini
-   DATABASE_URL=postgresql+psycopg2://postgres:YOUR_PASSWORD@localhost:5432/abhigyan_db
+   DATABASE_URL=postgresql://postgres.PROJECT-REF:YOUR-PASSWORD@YOUR-POOLER-HOST:5432/postgres?sslmode=require
    CORS_ORIGINS=http://localhost:5173,http://localhost:4173
    ENVIRONMENT=development
    API_PREFIX=/api
@@ -180,19 +182,19 @@ cd Abhigyan
    AI_CONFIDENCE_THRESHOLD=0.40
    ```
 
-4. Verify database connectivity and auto-create target database:
+4. Verify database connectivity (this command only checks the connection; Supabase creates the project database for you):
    ```powershell
    python backend/check_db.py
    ```
 
-5. Run Alembic migrations:
+5. Apply the schema migrations to your Supabase project:
    ```powershell
    cd backend
    alembic upgrade head
    cd ..
    ```
 
-6. Seed database with demo records (idempotent):
+6. Optional: seed demo records. Do this only for a new/empty project or if you want the demo accounts and sample cases in your Supabase database:
    ```powershell
    python backend/app/seed.py
    ```
