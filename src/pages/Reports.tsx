@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Bar,
   BarChart,
@@ -15,19 +15,26 @@ import {
   YAxis,
 } from 'recharts'
 import {
+  AlertCircle,
   BarChart3,
+  Calendar,
   CheckCircle2,
+  Clock,
   Download,
   FileSpreadsheet,
   FileText,
   Filter,
+  Loader2,
   PieChart as PieIcon,
   Printer,
+  RefreshCw,
+  RotateCcw,
   TrendingUp,
 } from 'lucide-react'
-import type { Complaint } from '../types'
+import type { Complaint, Role, UserProfile, ReportsAnalyticsResponse } from '../types'
 import { BUREAUS, BUREAU_INFO, STATUSES, TODAY, instName, resolveOfficerName } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle } from '../components/ui'
+import { fetchReportsAnalyticsApi } from '../api/analytics'
 
 const PALETTE = ['#0b2250', '#1d4a94', '#0d9488', '#f59e0b', '#dc2626', '#8b5cf6', '#64748b']
 const STATUS_COLORS: Record<string, string> = {
@@ -37,49 +44,182 @@ const STATUS_COLORS: Record<string, string> = {
   Resolved: '#10b981',
 }
 
-export default function Reports({ complaints }: { complaints: Complaint[] }) {
-  const [reportPeriod, setReportPeriod] = useState('Current Academic Year (2026-27)')
+interface ReportsProps {
+  complaints: Complaint[]
+  currentRole?: Role
+  currentUser?: UserProfile
+}
+
+export default function Reports({ complaints, currentRole, currentUser }: ReportsProps) {
+  const initialBureau =
+    currentRole === 'BureauAdmin' && currentUser?.bureau && currentUser.bureau !== 'All'
+      ? currentUser.bureau
+      : 'All'
+
+  const [bureauFilter, setBureauFilter] = useState<string>(initialBureau)
+  const [startDate, setStartDate] = useState<string>('')
+  const [endDate, setEndDate] = useState<string>('')
   const [downloadSuccess, setDownloadSuccess] = useState(false)
 
-  // 1. Complaint Categories data
-  const categoryCounts: Record<string, number> = {}
-  complaints.forEach((c) => {
-    categoryCounts[c.category] = (categoryCounts[c.category] || 0) + 1
-  })
-  const categoryData = Object.entries(categoryCounts).map(([name, value]) => ({ name, value }))
+  const [analytics, setAnalytics] = useState<ReportsAnalyticsResponse | null>(null)
+  const [isLoading, setIsLoading] = useState<boolean>(false)
+  const [apiError, setApiError] = useState<string | null>(null)
 
-  // 2. Status Distribution data
-  const statusData = STATUSES.map((s) => ({
-    name: s,
-    value: complaints.filter((c) => c.status === s).length,
-  }))
-
-  // 3. Bureau-wise stacked bar data
-  const bureauData = BUREAUS.map((b) => {
-    const list = complaints.filter((c) => c.bureau === b)
-    return {
-      name: b,
-      Resolved: list.filter((c) => c.status === 'Resolved').length,
-      'In Progress': list.filter((c) => c.status === 'In Progress').length,
-      Pending: list.filter((c) => c.status === 'Pending').length,
-      Escalated: list.filter((c) => c.status === 'Escalated').length,
-      Total: list.length,
+  // Scope complaints in-memory for fallback
+  const scopedComplaints = useMemo(() => {
+    let list = complaints
+    if (currentRole === 'Complainant') {
+      list = list.filter((c) =>
+        Boolean(
+          (currentUser?.id && c.complainantUserId === currentUser.id) ||
+          (currentUser?.email &&
+            c.complainantEmail &&
+            c.complainantEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase())
+        )
+      )
+    } else if (currentRole === 'Officer') {
+      list = list.filter((c) => {
+        if (c.assignedUserId) {
+          return Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
+        }
+        return Boolean(
+          currentUser?.name &&
+          (c.officer === currentUser.name || resolveOfficerName(c) === currentUser.name)
+        )
+      })
+    } else if (currentRole === 'BureauAdmin') {
+      list = list.filter((c) =>
+        currentUser?.bureau === 'All' ||
+        c.bureau.toUpperCase() === (currentUser?.bureau || '').toUpperCase()
+      )
     }
-  })
 
-  // 4. Monthly Trend Data (Simulated 6-Month Intake vs Closure)
-  const monthlyData = [
-    { month: 'May 2026', Filed: 12, Resolved: 10 },
-    { month: 'Jun 2026', Filed: 18, Resolved: 14 },
-    { month: 'Jul 2026', Filed: 24, Resolved: 19 },
-    { month: 'Aug 2026', Filed: 22, Resolved: 21 },
-    { month: 'Sep 2026', Filed: 28, Resolved: 25 },
-    { month: 'Oct 2026', Filed: 15, Resolved: 11 },
-  ]
+    if (bureauFilter !== 'All') {
+      list = list.filter((c) => c.bureau.toUpperCase() === bureauFilter.toUpperCase())
+    }
+    if (startDate) {
+      list = list.filter((c) => c.date >= startDate)
+    }
+    if (endDate) {
+      list = list.filter((c) => c.date <= endDate)
+    }
+    return list
+  }, [complaints, currentRole, currentUser, bureauFilter, startDate, endDate])
+
+  // Fetch real database-backed reports analytics
+  const loadReportsAnalytics = useCallback(async () => {
+    setIsLoading(true)
+    setApiError(null)
+    try {
+      const data = await fetchReportsAnalyticsApi({
+        bureau: bureauFilter !== 'All' ? bureauFilter : undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        asOfDate: TODAY,
+      })
+      setAnalytics(data)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unable to connect to backend reports analytics service.'
+      setApiError(msg)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [bureauFilter, startDate, endDate])
+
+  useEffect(() => {
+    loadReportsAnalytics()
+  }, [loadReportsAnalytics])
+
+  // In-memory fallback computations
+  const fallbackCategoryData = useMemo(() => {
+    const counts: Record<string, number> = {}
+    scopedComplaints.forEach((c) => {
+      counts[c.category] = (counts[c.category] || 0) + 1
+    })
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+  }, [scopedComplaints])
+
+  const fallbackStatusData = useMemo(() => {
+    return STATUSES.map((s) => ({
+      name: s,
+      value: scopedComplaints.filter((c) => c.status === s).length,
+    }))
+  }, [scopedComplaints])
+
+  const fallbackBureauData = useMemo(() => {
+    return BUREAUS.map((b) => {
+      const list = scopedComplaints.filter((c) => c.bureau === b)
+      return {
+        name: b,
+        Resolved: list.filter((c) => c.status === 'Resolved').length,
+        'In Progress': list.filter((c) => c.status === 'In Progress').length,
+        Pending: list.filter((c) => c.status === 'Pending').length,
+        Escalated: list.filter((c) => c.status === 'Escalated').length,
+        Total: list.length,
+      }
+    })
+  }, [scopedComplaints])
+
+  const fallbackTurnaroundDays = useMemo(() => {
+    const resolved = scopedComplaints.filter((c) => c.status === 'Resolved' && c.date)
+    const turnarounds: number[] = []
+    for (const c of resolved) {
+      const resDate = c.lastActionDate || c.date
+      const t1 = new Date(c.date).getTime()
+      const t2 = new Date(resDate).getTime()
+      const diff = Math.round((t2 - t1) / (1000 * 3600 * 24))
+      if (diff >= 0) turnarounds.push(diff)
+    }
+    return turnarounds.length > 0 ? (turnarounds.reduce((a, b) => a + b, 0) / turnarounds.length).toFixed(1) : null
+  }, [scopedComplaints])
+
+  // Active chart and table datasets
+  const categoryData = analytics ? analytics.categoryDistribution : fallbackCategoryData
+  const statusData = analytics ? analytics.statusDistribution : fallbackStatusData
+  const bureauData = analytics ? analytics.bureauBreakdown : fallbackBureauData
+  const monthlyData = analytics ? analytics.monthlyTrends : []
+
+  const totalCases = analytics ? analytics.kpis.total : scopedComplaints.length
+  const resolvedCases = analytics
+    ? analytics.kpis.resolved
+    : scopedComplaints.filter((c) => c.status === 'Resolved').length
+  const resolutionRate = analytics
+    ? analytics.kpis.resolutionRate
+    : totalCases > 0
+    ? Math.round((resolvedCases / totalCases) * 100)
+    : 0
+
+  const avgTurnaroundDisplay = analytics
+    ? analytics.kpis.avgTurnaroundDays !== null
+      ? `${analytics.kpis.avgTurnaroundDays} Days`
+      : 'N/A'
+    : fallbackTurnaroundDays !== null
+    ? `${fallbackTurnaroundDays} Days`
+    : 'N/A'
+
+  const redundancyRateDisplay = analytics
+    ? analytics.kpis.redundancyPreventedRate !== null
+      ? `${analytics.kpis.redundancyPreventedRate}%`
+      : currentRole === 'Complainant'
+      ? 'Restricted'
+      : '0%'
+    : currentRole === 'Complainant'
+    ? 'Restricted'
+    : '0%'
 
   const handlePrint = () => {
     window.print()
   }
+
+  const handleResetFilters = () => {
+    setBureauFilter(initialBureau)
+    setStartDate('')
+    setEndDate('')
+  }
+
+  const isFilterActive = bureauFilter !== initialBureau || Boolean(startDate) || Boolean(endDate)
 
   const handleDownloadDossierCSV = () => {
     const headers = [
@@ -102,7 +242,7 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
       return `"${escaped}"`
     }
 
-    const rows = complaints.map((c) => [
+    const rows = scopedComplaints.map((c) => [
       c.id,
       c.institutionPermanentId || '',
       instName(c.institutionId),
@@ -142,7 +282,7 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
     <div className="space-y-6">
       <PageTitle
         title="Reports, Trends &amp; Data Analytics"
-        sub="Statutory compliance metrics, resolution throughput, and cross-bureau intelligence"
+        sub="Statutory compliance metrics, resolution throughput, and cross-bureau intelligence aggregated from live records"
         action={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handlePrint} className="text-xs">
@@ -162,12 +302,123 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
         }
       />
 
+      {/* Filter and Date-Range Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Bureau Filter */}
+          <div className="flex items-center gap-1.5 text-xs text-slate-600">
+            <Filter size={14} className="text-slate-400" />
+            <span className="font-semibold text-slate-700">Bureau Scope:</span>
+            <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50/70 p-0.5">
+              {['All', 'RB', 'PGRC', 'Approval', 'Academic', 'SB', 'EO'].map((b) => {
+                const isRestricted =
+                  currentRole === 'BureauAdmin' &&
+                  currentUser?.bureau &&
+                  currentUser.bureau !== 'All' &&
+                  b !== 'All' &&
+                  b.toUpperCase() !== currentUser.bureau.toUpperCase()
+
+                return (
+                  <button
+                    key={b}
+                    onClick={() => !isRestricted && setBureauFilter(b)}
+                    disabled={isRestricted}
+                    title={isRestricted ? `Restricted to authorized ${currentUser?.bureau} Bureau` : undefined}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                      bureauFilter === b
+                        ? 'bg-navy-800 text-white shadow-2xs'
+                        : isRestricted
+                        ? 'opacity-40 cursor-not-allowed text-slate-400'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    {b}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Date Range Inputs */}
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <Calendar size={14} className="text-slate-400 ml-2" />
+            <span className="font-semibold text-slate-700">Filing Period:</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1 text-xs text-slate-800 focus:border-navy-600 focus:outline-hidden"
+              placeholder="From"
+            />
+            <span className="text-slate-400">&ndash;</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1 text-xs text-slate-800 focus:border-navy-600 focus:outline-hidden"
+              placeholder="To"
+            />
+          </div>
+        </div>
+
+        {/* Clear Filters / Reload */}
+        <div className="flex items-center gap-2">
+          {isFilterActive && (
+            <button
+              onClick={handleResetFilters}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+            >
+              <RotateCcw size={12} />
+              <span>Reset Filters</span>
+            </button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadReportsAnalytics}
+            disabled={isLoading}
+            className="text-xs"
+          >
+            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+            <span>{isLoading ? 'Computing...' : 'Recalculate'}</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* API Notice / Error */}
+      {apiError && (
+        <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50/90 p-3.5 text-xs text-amber-900 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle size={16} className="text-amber-700 shrink-0" />
+            <span>
+              <strong>Analytics Service Notice:</strong> {apiError}. Reports are displaying client-side verified complaint counts.
+            </span>
+          </div>
+          <button
+            onClick={loadReportsAnalytics}
+            className="text-amber-800 hover:text-amber-950 font-bold underline ml-4"
+          >
+            Retry Connection
+          </button>
+        </div>
+      )}
+
+      {/* Historical Data Limitation Notice (when real historical months are limited) */}
+      {analytics?.dataNote && (
+        <div className="flex items-center gap-2.5 rounded-lg border border-blue-200 bg-blue-50/80 px-4 py-2.5 text-xs text-blue-900 shadow-2xs">
+          <Clock size={15} className="text-blue-700 shrink-0" />
+          <span>
+            <strong>Data Scope Notice:</strong> {analytics.dataNote} Chart points strictly reflect verified database records.
+          </span>
+        </div>
+      )}
+
       {downloadSuccess && (
         <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900 shadow-2xs">
           <div className="flex items-center gap-2.5">
             <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
             <span>
-              Real case data dossier successfully generated and downloaded as <strong>AICTE_Abhigyan_Compliance_Dossier_{TODAY}.csv</strong> ({complaints.length} records). For printable PDF output, use the &quot;Print Dossier (PDF)&quot; feature.
+              Real case data dossier successfully generated and downloaded as <strong>AICTE_Abhigyan_Compliance_Dossier_{TODAY}.csv</strong> ({totalCases} records). For printable PDF output, use the &quot;Print Dossier (PDF)&quot; feature.
             </span>
           </div>
           <button
@@ -186,7 +437,7 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
             <FileText size={22} />
           </div>
           <div>
-            <div className="text-2xl font-bold text-slate-900">{complaints.length}</div>
+            <div className="text-2xl font-bold text-slate-900">{totalCases}</div>
             <div className="text-xs text-slate-500">Cumulative Registered Cases</div>
           </div>
         </Card>
@@ -196,12 +447,7 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
             <CheckCircle2 size={22} />
           </div>
           <div>
-            <div className="text-2xl font-bold text-slate-900">
-              {Math.round(
-                (complaints.filter((c) => c.status === 'Resolved').length / complaints.length) * 100
-              )}
-              %
-            </div>
+            <div className="text-2xl font-bold text-slate-900">{resolutionRate}%</div>
             <div className="text-xs text-slate-500">Resolution Clearance Rate</div>
           </div>
         </Card>
@@ -211,8 +457,12 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
             <TrendingUp size={22} />
           </div>
           <div>
-            <div className="text-2xl font-bold text-slate-900">11.4 Days</div>
-            <div className="text-xs text-slate-500">Avg. Redressal Turnaround (simulated)</div>
+            <div className="text-2xl font-bold text-slate-900">{avgTurnaroundDisplay}</div>
+            <div className="text-xs text-slate-500">
+              {analytics?.kpis.avgTurnaroundDays !== null
+                ? 'Avg. Redressal Turnaround (real historical)'
+                : 'Avg. Redressal Turnaround (no closed cases)'}
+            </div>
           </div>
         </Card>
 
@@ -221,8 +471,12 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
             <BarChart3 size={22} />
           </div>
           <div>
-            <div className="text-2xl font-bold text-slate-900">92%</div>
-            <div className="text-xs text-slate-500">Overlap Redundancy Prevented (simulated)</div>
+            <div className="text-2xl font-bold text-slate-900">{redundancyRateDisplay}</div>
+            <div className="text-xs text-slate-500">
+              {currentRole === 'Complainant'
+                ? 'Overlap Redundancy (restricted)'
+                : 'Overlap Redundancy Actioned'}
+            </div>
           </div>
         </Card>
       </div>
@@ -236,32 +490,39 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
             sub="Distribution of complaints across key regulatory focus areas"
           />
           <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={categoryData}
-                  dataKey="value"
-                  nameKey="name"
-                  outerRadius={95}
-                  innerRadius={45}
-                  paddingAngle={3}
-                  label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                  labelLine={false}
-                >
-                  {categoryData.map((_, i) => (
-                    <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '8px',
-                    borderColor: '#e2e8f0',
-                    fontSize: '12px',
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {categoryData.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-slate-400">
+                <PieIcon size={36} className="text-slate-300 mb-2" />
+                <p className="text-xs">No complaint categories found in current scope</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={categoryData}
+                    dataKey="value"
+                    nameKey="name"
+                    outerRadius={95}
+                    innerRadius={45}
+                    paddingAngle={3}
+                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                    labelLine={false}
+                  >
+                    {categoryData.map((_, i) => (
+                      <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      borderColor: '#e2e8f0',
+                      fontSize: '12px',
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </Card>
 
@@ -272,32 +533,39 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
             sub="Active case progression and completion stage"
           />
           <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={statusData}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={60}
-                  outerRadius={95}
-                  paddingAngle={4}
-                  label={({ name, value }) => `${name}: ${value}`}
-                >
-                  {statusData.map((s) => (
-                    <Cell key={s.name} fill={STATUS_COLORS[s.name] || '#64748b'} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '8px',
-                    borderColor: '#e2e8f0',
-                    fontSize: '12px',
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: '12px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+            {totalCases === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-slate-400">
+                <Clock size={36} className="text-slate-300 mb-2" />
+                <p className="text-xs">No cases recorded for resolution tracking</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={statusData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={60}
+                    outerRadius={95}
+                    paddingAngle={4}
+                    label={({ name, value }) => `${name}: ${value}`}
+                  >
+                    {statusData.map((s) => (
+                      <Cell key={s.name} fill={STATUS_COLORS[s.name] || '#64748b'} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      borderColor: '#e2e8f0',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </Card>
       </div>
@@ -311,71 +579,88 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
             sub="Comparative volume and disposal efficiency across AICTE Bureaus"
           />
           <div className="h-80 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={bureauData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" fontSize={12} stroke="#64748b" tickLine={false} />
-                <YAxis allowDecimals={false} fontSize={12} stroke="#64748b" tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '8px',
-                    borderColor: '#e2e8f0',
-                    fontSize: '12px',
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                {STATUSES.map((s) => (
-                  <Bar
-                    key={s}
-                    dataKey={s}
-                    stackId="a"
-                    fill={STATUS_COLORS[s]}
-                    radius={s === 'Escalated' ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+            {totalCases === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-slate-400">
+                <BarChart3 size={36} className="text-slate-300 mb-2" />
+                <p className="text-xs">No bureau records found matching filters</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={bureauData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" fontSize={12} stroke="#64748b" tickLine={false} />
+                  <YAxis allowDecimals={false} fontSize={12} stroke="#64748b" tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      borderColor: '#e2e8f0',
+                      fontSize: '12px',
+                    }}
                   />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                  {STATUSES.map((s) => (
+                    <Bar
+                      key={s}
+                      dataKey={s}
+                      stackId="a"
+                      fill={STATUS_COLORS[s]}
+                      radius={s === 'Escalated' ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </Card>
 
-        {/* 6-Month Intake vs Resolution Trend */}
+        {/* Real Historical Intake vs Resolution Trend */}
         <Card>
           <CardHeader
-            title="6-Month Intake vs Closure Trend"
-            sub="Simulated illustrative data — not sourced from live AICTE records"
+            title="Intake vs Closure Historical Trend"
+            sub="Aggregated from real database records (no fabricated or simulated data points)"
           />
           <div className="h-80 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="month" fontSize={10} stroke="#64748b" tickLine={false} />
-                <YAxis fontSize={12} stroke="#64748b" tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '8px',
-                    borderColor: '#e2e8f0',
-                    fontSize: '12px',
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Line
-                  type="monotone"
-                  dataKey="Filed"
-                  stroke="#ef4444"
-                  strokeWidth={2.5}
-                  dot={{ r: 4 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="Resolved"
-                  stroke="#10b981"
-                  strokeWidth={2.5}
-                  dot={{ r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {monthlyData.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-slate-400 px-4 text-center">
+                <TrendingUp size={36} className="text-slate-300 mb-2" />
+                <p className="text-xs font-medium text-slate-600">No Historical Time-Series Records</p>
+                <p className="text-2xs text-slate-400 mt-1">
+                  Complaints matching the current scope or date range do not span multiple historical months.
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={monthlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="month" fontSize={10} stroke="#64748b" tickLine={false} />
+                  <YAxis allowDecimals={false} fontSize={12} stroke="#64748b" tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      borderColor: '#e2e8f0',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+                  <Line
+                    type="monotone"
+                    dataKey="Filed"
+                    stroke="#ef4444"
+                    strokeWidth={2.5}
+                    dot={{ r: 4 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="Resolved"
+                    stroke="#10b981"
+                    strokeWidth={2.5}
+                    dot={{ r: 4 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </Card>
       </div>

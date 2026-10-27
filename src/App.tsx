@@ -1599,7 +1599,13 @@ export default function App() {
             />
           )}
 
-          {activePage === 'reports' && <Reports complaints={complaints} />}
+          {activePage === 'reports' && (
+            <Reports
+              complaints={complaints}
+              currentRole={currentRole}
+              currentUser={currentUser}
+            />
+          )}
 
           {activePage === 'notifications' && (
             <NotificationsPage

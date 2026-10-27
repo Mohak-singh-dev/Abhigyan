@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, and_
 
 status = http_status
 
@@ -378,8 +378,11 @@ def list_complaints(
     elif current_user.role == "Officer":
         query = query.filter(
             or_(
-                Complaint.officer.ilike(current_user.name.strip()),
                 Complaint.assigned_user_id == current_user.id,
+                and_(
+                    Complaint.assigned_user_id.is_(None),
+                    Complaint.officer.ilike(current_user.name.strip()),
+                ),
             )
         )
 

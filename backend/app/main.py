@@ -8,6 +8,7 @@ from app.routers.auth import router as auth_router
 from app.routers.overlaps import router as overlaps_router
 from app.routers.settings import router as settings_router
 from app.routers.users import router as users_router
+from app.routers.analytics import router as analytics_router
 
 app = FastAPI(
     title="Abhigyan AICTE Complaint Monitoring & Tracking API",
@@ -34,6 +35,7 @@ app.include_router(institutions_router, prefix=settings.API_PREFIX)
 app.include_router(complaints_router, prefix=settings.API_PREFIX)
 app.include_router(overlaps_router, prefix=settings.API_PREFIX)
 app.include_router(settings_router, prefix=settings.API_PREFIX)
+app.include_router(analytics_router, prefix=settings.API_PREFIX)
 
 @app.get("/", tags=["Root"])
 def root():
@@ -45,4 +47,5 @@ def root():
         "institutions": f"{settings.API_PREFIX}/institutions",
         "complaints": f"{settings.API_PREFIX}/complaints",
         "users": f"{settings.API_PREFIX}/users",
+        "analytics": f"{settings.API_PREFIX}/analytics",
     }

@@ -75,6 +75,7 @@ export interface Complaint {
   priority: Priority
   officer: string
   assignedUserId?: string
+  complainantUserId?: string
   status: Status
   date: string
   due: string
@@ -200,3 +201,78 @@ export interface AppSettings {
   updatedAt?: string
   updatedBy?: string
 }
+
+export interface DashboardKPIs {
+  total: number
+  pending: number
+  inProgress: number
+  resolved: number
+  escalated: number
+  underInvestigation: number
+  overdue: number
+  criticalHigh: number
+  resolutionRate: number
+  pendingOverlaps: number
+  totalTrend?: string | null
+  totalTrendLabel: string
+  asOfDate: string
+}
+
+export interface BureauBreakdownItem {
+  name: string
+  Resolved: number
+  'In Progress': number
+  Pending: number
+  Escalated: number
+  Total: number
+}
+
+export interface PriorityDistributionItem {
+  name: string
+  value: number
+  color: string
+}
+
+export interface DashboardAnalyticsResponse {
+  kpis: DashboardKPIs
+  bureauBreakdown: BureauBreakdownItem[]
+  priorityDistribution: PriorityDistributionItem[]
+  recentCases: Complaint[]
+}
+
+export interface MonthlyTrendItem {
+  month: string
+  monthKey: string
+  Filed: number
+  Resolved: number
+}
+
+export interface CategoryDistributionItem {
+  name: string
+  value: number
+}
+
+export interface StatusDistributionItem {
+  name: string
+  value: number
+}
+
+export interface ReportsKPIs {
+  total: number
+  resolved: number
+  resolutionRate: number
+  avgTurnaroundDays: number | null
+  turnaroundDaysLabel: string
+  redundancyPreventedRate: number | null
+  redundancyPreventedLabel: string
+}
+
+export interface ReportsAnalyticsResponse {
+  kpis: ReportsKPIs
+  categoryDistribution: CategoryDistributionItem[]
+  statusDistribution: StatusDistributionItem[]
+  bureauBreakdown: BureauBreakdownItem[]
+  monthlyTrends: MonthlyTrendItem[]
+  dataNote?: string | null
+}
+

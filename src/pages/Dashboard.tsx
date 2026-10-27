@@ -1,23 +1,21 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
   BarChart3,
-  Building2,
+  Calendar,
   CheckCircle2,
   Clock,
-  ExternalLink,
-  FilePlus,
-  FileText,
+  Filter,
   Flame,
   GitMerge,
-  HelpCircle,
-  Landmark,
-  Layers,
+  Loader2,
   RefreshCw,
+  RotateCcw,
   Shield,
   TrendingUp,
+  FileText,
 } from 'lucide-react'
 import {
   Bar,
@@ -32,11 +30,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { Complaint, Page, Role, Status, UserProfile } from '../types'
-import { BUREAUS, BUREAU_INFO, CURRENT_OFFICER, TODAY, isOverdue, overlaps, resolveOfficerName, getAppSettings } from '../data'
+import type { Complaint, DashboardAnalyticsResponse, Page, Role, Status, UserProfile } from '../types'
+import { BUREAUS, BUREAU_INFO, TODAY, isOverdue, overlaps, resolveOfficerName, getAppSettings } from '../data'
 import { DEFAULT_OVERLAP_STATES, OVERLAP_STORAGE_KEYS, isOverlapActivePending } from './Overlaps'
 import { Button, Card, CardHeader, PageTitle, Stat } from '../components/ui'
 import ComplaintTable from '../components/ComplaintTable'
+import { fetchDashboardAnalyticsApi } from '../api/analytics'
 
 interface DashboardProps {
   complaints: Complaint[]
@@ -57,47 +56,100 @@ export default function Dashboard({
   currentUser,
   pendingOverlapsCount,
 }: DashboardProps) {
-  const [bureauFilter, setBureauFilter] = useState<string>('All')
+  // If user is BureauAdmin, default to their bureau if not 'All'
+  const initialBureau =
+    currentRole === 'BureauAdmin' && currentUser?.bureau && currentUser.bureau !== 'All'
+      ? currentUser.bureau
+      : 'All'
 
-  // Scope complaints based on active authenticated role and identity
+  const [bureauFilter, setBureauFilter] = useState<string>(initialBureau)
+  const [startDate, setStartDate] = useState<string>('')
+  const [endDate, setEndDate] = useState<string>('')
+
+  const [analytics, setAnalytics] = useState<DashboardAnalyticsResponse | null>(null)
+  const [isLoading, setIsLoading] = useState<boolean>(false)
+  const [apiError, setApiError] = useState<string | null>(null)
+
+  // Scope complaints in-memory for fallback
   const scopedComplaints = useMemo(() => {
+    let list = complaints
     if (currentRole === 'Complainant') {
-      return complaints.filter((c) =>
+      list = list.filter((c) =>
         Boolean(
-          currentUser?.email &&
-          c.complainantEmail &&
-          c.complainantEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase()
+          (currentUser?.id && c.complainantUserId === currentUser.id) ||
+          (currentUser?.email &&
+            c.complainantEmail &&
+            c.complainantEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase())
         )
       )
-    }
-    if (currentRole === 'Officer') {
-      return complaints.filter((c) =>
-        c.officer === currentUser?.name ||
-        resolveOfficerName(c) === currentUser?.name ||
-        Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
-      )
-    }
-    if (currentRole === 'BureauAdmin') {
-      return complaints.filter((c) =>
+    } else if (currentRole === 'Officer') {
+      list = list.filter((c) => {
+        if (c.assignedUserId) {
+          return Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
+        }
+        return Boolean(
+          currentUser?.name &&
+          (c.officer === currentUser.name || resolveOfficerName(c) === currentUser.name)
+        )
+      })
+    } else if (currentRole === 'BureauAdmin') {
+      list = list.filter((c) =>
         currentUser?.bureau === 'All' ||
         c.bureau.toUpperCase() === (currentUser?.bureau || '').toUpperCase()
       )
     }
-    return complaints
-  }, [complaints, currentRole, currentUser])
 
-  // Calculated statistics
-  const totalCases = scopedComplaints.length
-  const pendingCases = scopedComplaints.filter((c) => c.status === 'Pending').length
-  const inProgressCases = scopedComplaints.filter((c) => c.status === 'In Progress').length
-  const resolvedCases = scopedComplaints.filter((c) => c.status === 'Resolved').length
-  const escalatedCases = scopedComplaints.filter((c) => c.status === 'Escalated').length
-  const overdueCases = scopedComplaints.filter(isOverdue).length
-  const criticalHighCases = scopedComplaints.filter(
+    if (bureauFilter !== 'All') {
+      list = list.filter((c) => c.bureau.toUpperCase() === bureauFilter.toUpperCase())
+    }
+    if (startDate) {
+      list = list.filter((c) => c.date >= startDate)
+    }
+    if (endDate) {
+      list = list.filter((c) => c.date <= endDate)
+    }
+    return list
+  }, [complaints, currentRole, currentUser, bureauFilter, startDate, endDate])
+
+  // Fetch real database-backed analytics
+  const loadAnalytics = useCallback(async () => {
+    setIsLoading(true)
+    setApiError(null)
+    try {
+      const data = await fetchDashboardAnalyticsApi({
+        bureau: bureauFilter !== 'All' ? bureauFilter : undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        asOfDate: TODAY,
+      })
+      setAnalytics(data)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unable to connect to backend analytics service.'
+      setApiError(msg)
+      // Fallback remains active via in-memory scopedComplaints
+    } finally {
+      setIsLoading(false)
+    }
+  }, [bureauFilter, startDate, endDate])
+
+  useEffect(() => {
+    loadAnalytics()
+  }, [loadAnalytics])
+
+  // Fallback in-memory calculations if API not yet loaded or on error
+  const fallbackTotal = scopedComplaints.length
+  const fallbackPending = scopedComplaints.filter((c) => c.status === 'Pending').length
+  const fallbackInProgress = scopedComplaints.filter((c) => c.status === 'In Progress').length
+  const fallbackResolved = scopedComplaints.filter((c) => c.status === 'Resolved').length
+  const fallbackEscalated = scopedComplaints.filter((c) => c.status === 'Escalated').length
+  const fallbackOverdue = scopedComplaints.filter(isOverdue).length
+  const fallbackCriticalHigh = scopedComplaints.filter(
     (c) => c.priority === 'Critical' || c.priority === 'High'
   ).length
-  const pendingOverlaps =
-    pendingOverlapsCount !== undefined
+  const fallbackPendingOverlaps =
+    currentRole === 'Complainant'
+      ? 0
+      : pendingOverlapsCount !== undefined
       ? pendingOverlapsCount
       : (() => {
           try {
@@ -109,38 +161,206 @@ export default function Dashboard({
             return overlaps.filter((o) => isOverlapActivePending(o, DEFAULT_OVERLAP_STATES, 75)).length
           }
         })()
-  const resolutionRate = Math.round((resolvedCases / totalCases) * 100) || 0
+  const fallbackResolutionRate = Math.round((fallbackResolved / fallbackTotal) * 100) || 0
 
-  // Filtered recent cases
-  const recentCases = scopedComplaints
-    .filter((c) => bureauFilter === 'All' || c.bureau === bureauFilter)
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 5)
+  // Active metrics: prefer live database-backed analytics from backend
+  const totalCases = analytics ? analytics.kpis.total : fallbackTotal
+  const pendingCases = analytics ? analytics.kpis.pending : fallbackPending
+  const inProgressCases = analytics ? analytics.kpis.inProgress : fallbackInProgress
+  const resolvedCases = analytics ? analytics.kpis.resolved : fallbackResolved
+  const escalatedCases = analytics ? analytics.kpis.escalated : fallbackEscalated
+  const overdueCases = analytics ? analytics.kpis.overdue : fallbackOverdue
+  const criticalHighCases = analytics ? analytics.kpis.criticalHigh : fallbackCriticalHigh
+  const pendingOverlaps = analytics ? analytics.kpis.pendingOverlaps : fallbackPendingOverlaps
+  const resolutionRate = analytics ? analytics.kpis.resolutionRate : fallbackResolutionRate
 
-  // Chart Data: Bureaus
-  const bureauData = BUREAUS.map((b) => {
-    const list = scopedComplaints.filter((c) => c.bureau === b)
-    return {
-      name: b,
-      Resolved: list.filter((c) => c.status === 'Resolved').length,
-      'In Progress': list.filter((c) => c.status === 'In Progress').length,
-      Pending: list.filter((c) => c.status === 'Pending').length,
-      Escalated: list.filter((c) => c.status === 'Escalated').length,
-      Total: list.length,
+  // Real historical trend from backend
+  const totalTrend = analytics?.kpis.totalTrend ?? null
+  const totalTrendLabel = analytics?.kpis.totalTrendLabel ?? (fallbackTotal > 0 ? 'in active scope' : 'no records')
+
+  // Bureau Chart Data
+  const bureauData = useMemo(() => {
+    if (analytics && analytics.bureauBreakdown.length > 0) {
+      return analytics.bureauBreakdown
     }
-  })
+    return BUREAUS.map((b) => {
+      const list = scopedComplaints.filter((c) => c.bureau === b)
+      return {
+        name: b,
+        Resolved: list.filter((c) => c.status === 'Resolved').length,
+        'In Progress': list.filter((c) => c.status === 'In Progress').length,
+        Pending: list.filter((c) => c.status === 'Pending').length,
+        Escalated: list.filter((c) => c.status === 'Escalated').length,
+        Total: list.length,
+      }
+    })
+  }, [analytics, scopedComplaints])
 
   // Priority Distribution Chart Data
-  const priorityData = [
-    { name: 'Critical', value: scopedComplaints.filter((c) => c.priority === 'Critical').length, color: '#dc2626' },
-    { name: 'High', value: scopedComplaints.filter((c) => c.priority === 'High').length, color: '#ea580c' },
-    { name: 'Medium', value: scopedComplaints.filter((c) => c.priority === 'Medium').length, color: '#d97706' },
-    { name: 'Low', value: scopedComplaints.filter((c) => c.priority === 'Low').length, color: '#64748b' },
-  ]
+  const priorityData = useMemo(() => {
+    if (analytics && analytics.priorityDistribution.length > 0) {
+      return analytics.priorityDistribution
+    }
+    return [
+      { name: 'Critical', value: scopedComplaints.filter((c) => c.priority === 'Critical').length, color: '#dc2626' },
+      { name: 'High', value: scopedComplaints.filter((c) => c.priority === 'High').length, color: '#ea580c' },
+      { name: 'Medium', value: scopedComplaints.filter((c) => c.priority === 'Medium').length, color: '#d97706' },
+      { name: 'Low', value: scopedComplaints.filter((c) => c.priority === 'Low').length, color: '#64748b' },
+    ]
+  }, [analytics, scopedComplaints])
+
+  // Recent complaints
+  const recentCases = useMemo(() => {
+    if (analytics && analytics.recentCases.length > 0) {
+      return analytics.recentCases
+    }
+    return [...scopedComplaints]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 5)
+  }, [analytics, scopedComplaints])
+
+  const handleResetFilters = () => {
+    setBureauFilter(initialBureau)
+    setStartDate('')
+    setEndDate('')
+  }
+
+  const isFilterActive = bureauFilter !== initialBureau || Boolean(startDate) || Boolean(endDate)
 
   return (
     <div className="space-y-6">
-      {/* Top Banner Alert if any Overdue or Overlaps exist */}
+      {/* Page Title & Scope Header */}
+      <PageTitle
+        title="Grievance Surveillance &amp; Executive Dashboard"
+        sub={
+          currentRole === 'Complainant'
+            ? 'Track your registered grievance filings, resolution progress, and SLA status'
+            : currentRole === 'Officer'
+            ? `Assigned grievance case surveillance for ${currentUser?.name || 'Officer'}`
+            : currentRole === 'BureauAdmin'
+            ? `Jurisdiction monitoring for ${currentUser?.bureau || 'Bureau'} Cell`
+            : 'AICTE Headquarters cross-bureau intelligence, statutory SLA surveillance, and case volume'
+        }
+        action={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadAnalytics}
+              disabled={isLoading}
+              className="text-xs flex items-center gap-1.5"
+            >
+              <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+              <span>{isLoading ? 'Updating...' : 'Refresh Live Data'}</span>
+            </Button>
+          </div>
+        }
+      />
+
+      {/* Filter and Date-Range Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Bureau Filter */}
+          <div className="flex items-center gap-1.5 text-xs text-slate-600">
+            <Filter size={14} className="text-slate-400" />
+            <span className="font-semibold text-slate-700">Bureau:</span>
+            <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50/70 p-0.5">
+              {['All', 'RB', 'PGRC', 'Approval', 'Academic', 'SB', 'EO'].map((b) => {
+                const isRestricted =
+                  currentRole === 'BureauAdmin' &&
+                  currentUser?.bureau &&
+                  currentUser.bureau !== 'All' &&
+                  b !== 'All' &&
+                  b.toUpperCase() !== currentUser.bureau.toUpperCase()
+
+                return (
+                  <button
+                    key={b}
+                    onClick={() => !isRestricted && setBureauFilter(b)}
+                    disabled={isRestricted}
+                    title={isRestricted ? `Restricted to authorized ${currentUser?.bureau} Bureau` : undefined}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                      bureauFilter === b
+                        ? 'bg-navy-800 text-white shadow-2xs'
+                        : isRestricted
+                        ? 'opacity-40 cursor-not-allowed text-slate-400'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    {b}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Date Range Filters */}
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <Calendar size={14} className="text-slate-400 ml-2" />
+            <span className="font-semibold text-slate-700">Filing Period:</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1 text-xs text-slate-800 focus:border-navy-600 focus:outline-hidden"
+              placeholder="From"
+            />
+            <span className="text-slate-400">&ndash;</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1 text-xs text-slate-800 focus:border-navy-600 focus:outline-hidden"
+              placeholder="To"
+            />
+          </div>
+        </div>
+
+        {/* Clear Filters / Indicator */}
+        <div className="flex items-center gap-2">
+          {isFilterActive && (
+            <button
+              onClick={handleResetFilters}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+            >
+              <RotateCcw size={12} />
+              <span>Reset Filters</span>
+            </button>
+          )}
+          <span className="text-xs font-medium text-slate-500">
+            {isLoading ? (
+              <span className="flex items-center gap-1.5 text-navy-700">
+                <Loader2 size={13} className="animate-spin" />
+                Aggregating live records...
+              </span>
+            ) : analytics ? (
+              <span className="text-slate-600">Aggregated: {totalCases} live verified case{totalCases === 1 ? '' : 's'}</span>
+            ) : (
+              <span className="text-amber-700">Client-scoped fallback: {totalCases} case{totalCases === 1 ? '' : 's'}</span>
+            )}
+          </span>
+        </div>
+      </div>
+
+      {/* API Error Notification with Retry option */}
+      {apiError && (
+        <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50/90 p-3.5 text-xs text-amber-900 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle size={16} className="text-amber-700 shrink-0" />
+            <span>
+              <strong>Backend Notice:</strong> {apiError}. Active view is utilizing client-side cached complaint aggregates.
+            </span>
+          </div>
+          <button
+            onClick={loadAnalytics}
+            className="text-amber-800 hover:text-amber-950 font-bold underline ml-4"
+          >
+            Retry Connection
+          </button>
+        </div>
+      )}
+
+      {/* Top Banner Alert if any Overdue cases exist */}
       {overdueCases > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50/90 p-4 text-red-900 shadow-2xs">
           <div className="flex items-center gap-3">
@@ -149,10 +369,10 @@ export default function Dashboard({
             </div>
             <div>
               <h4 className="text-sm font-bold">
-                {overdueCases} Case{overdueCases > 1 ? 's' : ''} Exceeded Configured SLA Window
+                {overdueCases} Case{overdueCases > 1 ? 's' : ''} Exceeded Statutory SLA Window
               </h4>
               <p className="text-xs text-red-700 mt-0.5">
-                Immediate review recommended for RB and PGRC grievance files overdue beyond the configured SLA window.
+                Immediate review recommended for grievance files past statutory due dates relative to active reference date ({TODAY}).
               </p>
             </div>
           </div>
@@ -176,8 +396,8 @@ export default function Dashboard({
           value={totalCases}
           icon={FileText}
           color="bg-navy-50 text-navy-800"
-          trend="+12%"
-          trendLabel="vs last month"
+          trend={totalTrend ?? undefined}
+          trendLabel={totalTrendLabel}
           onClick={() => onNavigate('complaints')}
         />
         <Stat
@@ -194,19 +414,21 @@ export default function Dashboard({
           value={overdueCases}
           icon={AlertTriangle}
           color="bg-rose-50 text-rose-700"
-          trend="Critical"
-          trendLabel="Urgent attention"
+          trend={overdueCases > 0 ? 'Critical' : 'Compliant'}
+          trendLabel={overdueCases > 0 ? 'Urgent attention' : 'Within SLA'}
           onClick={() => onNavigate('tracking')}
         />
-        <Stat
-          label="Cross-Bureau Overlaps"
-          value={pendingOverlaps}
-          icon={GitMerge}
-          color="bg-indigo-50 text-indigo-700"
-          trend="High Match"
-          trendLabel="RB ↔ PGRC pairs"
-          onClick={() => onNavigate('overlaps')}
-        />
+        {currentRole !== 'Complainant' && (
+          <Stat
+            label="Cross-Bureau Overlaps"
+            value={pendingOverlaps}
+            icon={GitMerge}
+            color="bg-indigo-50 text-indigo-700"
+            trend={pendingOverlaps > 0 ? 'High Match' : 'Cleared'}
+            trendLabel={pendingOverlaps > 0 ? 'RB ↔ PGRC pairs' : 'No duplicates'}
+            onClick={() => onNavigate('overlaps')}
+          />
+        )}
         <Stat
           label="Resolved Cases"
           value={resolvedCases}
@@ -221,7 +443,7 @@ export default function Dashboard({
           value={criticalHighCases}
           icon={Flame}
           color="bg-amber-50 text-amber-700"
-          trend={`${Math.round((criticalHighCases / totalCases) * 100)}%`}
+          trend={`${totalCases > 0 ? Math.round((criticalHighCases / totalCases) * 100) : 0}%`}
           trendLabel="of all cases"
           onClick={() => onNavigate('complaints')}
         />
@@ -233,7 +455,7 @@ export default function Dashboard({
         <Card className="lg:col-span-2">
           <CardHeader
             title="Bureau-Wise Complaint Case Distribution"
-            sub="Comparative analysis across RB (Regulation), PGRC (Public Grievance), Approval, and Academic"
+            sub="Comparative analysis across RB (Regulation), PGRC (Public Grievance), Approval, Academic, SB and EO"
             action={
               <Button
                 variant="outline"
@@ -246,27 +468,34 @@ export default function Dashboard({
             }
           />
           <div className="h-72 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={bureauData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" fontSize={12} stroke="#64748b" tickLine={false} />
-                <YAxis allowDecimals={false} fontSize={12} stroke="#64748b" tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '8px',
-                    borderColor: '#e2e8f0',
-                    fontSize: '12px',
-                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                <Bar dataKey="Resolved" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="In Progress" stackId="a" fill="#3b82f6" />
-                <Bar dataKey="Pending" stackId="a" fill="#f59e0b" />
-                <Bar dataKey="Escalated" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {totalCases === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-slate-400">
+                <BarChart3 size={36} className="text-slate-300 mb-2" />
+                <p className="text-xs">No complaint data recorded for the selected scope</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={bureauData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" fontSize={12} stroke="#64748b" tickLine={false} />
+                  <YAxis allowDecimals={false} fontSize={12} stroke="#64748b" tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      borderColor: '#e2e8f0',
+                      fontSize: '12px',
+                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                  <Bar dataKey="Resolved" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="In Progress" stackId="a" fill="#3b82f6" />
+                  <Bar dataKey="Pending" stackId="a" fill="#f59e0b" />
+                  <Bar dataKey="Escalated" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </Card>
 
@@ -277,31 +506,38 @@ export default function Dashboard({
             sub="Case priority breakdown across all active files"
           />
           <div className="h-56 w-full flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={priorityData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={75}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-                  {priorityData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '8px',
-                    borderColor: '#e2e8f0',
-                    fontSize: '12px',
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {totalCases === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-slate-400">
+                <Clock size={32} className="text-slate-300 mb-1" />
+                <p className="text-xs">No severity metrics available</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={priorityData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={75}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {priorityData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      borderColor: '#e2e8f0',
+                      fontSize: '12px',
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 text-xs">
             {priorityData.map((p) => (
@@ -316,37 +552,39 @@ export default function Dashboard({
       </div>
 
       {/* Cross-Bureau Overlap Highlight Banner */}
-      <Card className="border-l-4 border-l-teal-600 bg-gradient-to-r from-teal-50/40 via-white to-white">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-teal-600 text-white shadow-xs">
-                <GitMerge size={14} />
-              </span>
-              <h3 className="text-sm font-bold text-slate-900">
-                Cross-Bureau Overlap Detection Engine Active
-              </h3>
+      {currentRole !== 'Complainant' && (
+        <Card className="border-l-4 border-l-teal-600 bg-gradient-to-r from-teal-50/40 via-white to-white">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-teal-600 text-white shadow-xs">
+                  <GitMerge size={14} />
+                </span>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Cross-Bureau Overlap Detection Engine Active
+                </h3>
+              </div>
+              <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+                Monitoring duplicate grievances filed across{' '}
+                <strong className="text-indigo-800">Regulation Bureau (RB)</strong> and{' '}
+                <strong className="text-teal-800">Public Grievance Redressal Cell (PGRC)</strong>.{' '}
+                {pendingOverlaps > 0
+                  ? `${pendingOverlaps} unreviewed ${pendingOverlaps === 1 ? 'overlap candidate' : 'overlap candidates'} awaiting officer action with matching confidence scores based on institutional and semantic analysis.`
+                  : 'All detected cross-bureau overlap records have been reviewed and processed.'}
+              </p>
             </div>
-            <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
-              Monitoring duplicate grievances filed across{' '}
-              <strong className="text-indigo-800">Regulation Bureau (RB)</strong> and{' '}
-              <strong className="text-teal-800">Public Grievance Redressal Cell (PGRC)</strong>.{' '}
-              {pendingOverlaps > 0
-                ? `${pendingOverlaps} unreviewed ${pendingOverlaps === 1 ? 'overlap' : 'overlaps'} awaiting officer action with matching confidence scores up to 94% (demonstration logic based on keyword and institution matching).`
-                : 'All detected cross-bureau overlap records have been reviewed and processed.'}
-            </p>
+            <Button
+              variant="teal"
+              size="sm"
+              onClick={() => onNavigate('overlaps')}
+              className="text-xs flex items-center gap-1.5"
+            >
+              <span>Review Overlaps ({pendingOverlaps})</span>
+              <ArrowRight size={13} />
+            </Button>
           </div>
-          <Button
-            variant="teal"
-            size="sm"
-            onClick={() => onNavigate('overlaps')}
-            className="text-xs flex items-center gap-1.5"
-          >
-            <span>Review Overlaps ({pendingOverlaps})</span>
-            <ArrowRight size={13} />
-          </Button>
-        </div>
-      </Card>
+        </Card>
+      )}
 
       {/* Recent Complaints Table Section */}
       <Card>
@@ -354,27 +592,11 @@ export default function Dashboard({
           <div>
             <h3 className="text-base font-bold text-slate-900">Recent Complaints &amp; Status</h3>
             <p className="text-xs text-slate-500">
-              Latest incoming files across technical institutions and AICTE cells
+              Latest incoming files across technical institutions and AICTE cells in current scope
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50/60 p-1 text-xs">
-              {['All', 'RB', 'PGRC', 'Approval', 'Academic'].map((b) => (
-                <button
-                  key={b}
-                  onClick={() => setBureauFilter(b)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                    bureauFilter === b
-                      ? 'bg-navy-800 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                >
-                  {b}
-                </button>
-              ))}
-            </div>
-
             <Button
               variant="outline"
               size="sm"
@@ -386,15 +608,35 @@ export default function Dashboard({
           </div>
         </div>
 
-        <ComplaintTable
-          rows={recentCases}
-          onOpen={onOpen}
-          onStatus={onStatus}
-          compact={false}
-          showActions={true}
-          currentRole={currentRole}
-          currentUser={currentUser}
-        />
+        {recentCases.length === 0 ? (
+          <div className="py-10 text-center">
+            <FileText size={32} className="mx-auto text-slate-300 mb-2" />
+            <h4 className="text-sm font-semibold text-slate-700">No Complaints in Current Scope</h4>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+              No complaint records match the active role permissions, bureau filter, or date range.
+            </p>
+            {isFilterActive && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResetFilters}
+                className="mt-3 text-xs"
+              >
+                Reset Applied Filters
+              </Button>
+            )}
+          </div>
+        ) : (
+          <ComplaintTable
+            rows={recentCases}
+            onOpen={onOpen}
+            onStatus={onStatus}
+            compact={false}
+            showActions={true}
+            currentRole={currentRole}
+            currentUser={currentUser}
+          />
+        )}
       </Card>
     </div>
   )
