@@ -1,4 +1,4 @@
-# Abhigyan (अभिज्ञान)
+# Abhigyan
 
 **Integrated Dashboard for Monitoring, Tracking, and AI-Based Classification of Institution-Related Complaint Cases Across AICTE Bureaus & Cells**
 
