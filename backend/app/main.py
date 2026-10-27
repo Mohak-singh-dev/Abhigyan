@@ -7,6 +7,7 @@ from app.routers.complaints import router as complaints_router
 from app.routers.auth import router as auth_router
 from app.routers.overlaps import router as overlaps_router
 from app.routers.settings import router as settings_router
+from app.routers.users import router as users_router
 
 app = FastAPI(
     title="Abhigyan AICTE Complaint Monitoring & Tracking API",
@@ -28,6 +29,7 @@ app.add_middleware(
 # Register routers under configured API prefix (/api)
 app.include_router(health_router, prefix=settings.API_PREFIX)
 app.include_router(auth_router, prefix=settings.API_PREFIX)
+app.include_router(users_router, prefix=settings.API_PREFIX)
 app.include_router(institutions_router, prefix=settings.API_PREFIX)
 app.include_router(complaints_router, prefix=settings.API_PREFIX)
 app.include_router(overlaps_router, prefix=settings.API_PREFIX)
@@ -41,5 +43,6 @@ def root():
         "docs": "/docs",
         "health": f"{settings.API_PREFIX}/health",
         "institutions": f"{settings.API_PREFIX}/institutions",
-        "complaints": f"{settings.API_PREFIX}/complaints"
+        "complaints": f"{settings.API_PREFIX}/complaints",
+        "users": f"{settings.API_PREFIX}/users",
     }

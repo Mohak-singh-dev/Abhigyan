@@ -1,4 +1,4 @@
-from app.schemas.user import UserProfileBase, UserProfileCreate, UserProfileRead
+from app.schemas.user import UserProfileBase, UserProfileCreate, UserProfileRead, UserCreate, UserUpdate, UserStatusUpdate
 from app.schemas.institution import InstitutionBase, InstitutionCreate, InstitutionRead
 from app.schemas.complaint import (
     ComplaintBase,
@@ -17,6 +17,9 @@ __all__ = [
     "UserProfileBase",
     "UserProfileCreate",
     "UserProfileRead",
+    "UserCreate",
+    "UserUpdate",
+    "UserStatusUpdate",
     "InstitutionBase",
     "InstitutionCreate",
     "InstitutionRead",

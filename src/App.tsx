@@ -55,6 +55,7 @@ import {
   updateSettingsApi,
   resetSettingsApi,
 } from './api/settings'
+import { fetchUsersApi } from './api/users'
 import AppLayout from './components/layout/AppLayout'
 import Dashboard from './pages/Dashboard'
 import { ComplaintsPage, DetailsPage, SubmitComplaint } from './pages/Complaints'
@@ -343,12 +344,33 @@ export default function App() {
     }
   }
 
-  // Fetch fresh authorized complaints, overlaps & settings from backend when session user changes
+  const syncUsers = async () => {
+    if (!getAuthToken()) return
+    if (currentRole === 'Complainant') return
+    try {
+      const remote = await fetchUsersApi()
+      if (Array.isArray(remote)) {
+        setUsers(remote)
+        try {
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(remote))
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // Offline fallback: preserve local state
+    }
+  }
+
+  // Fetch fresh authorized complaints, overlaps, settings & users from backend when session user changes
   useEffect(() => {
     if (isLoggedIn && getAuthToken()) {
       syncComplaints()
       syncOverlaps()
       syncSettings()
+      if (currentRole !== 'Complainant') {
+        syncUsers()
+      }
     }
   }, [isLoggedIn, currentUser?.id])
 
@@ -507,7 +529,12 @@ export default function App() {
       if (permitted && !permitted.includes(activePage)) {
         setActivePage(getDefaultLandingPage(targetRole))
       }
-      await Promise.all([syncComplaints(), syncOverlaps(), syncSettings()])
+      await Promise.all([
+        syncComplaints(),
+        syncOverlaps(),
+        syncSettings(),
+        ...(targetRole !== 'Complainant' ? [syncUsers()] : []),
+      ])
     } catch {
       const deniedNotif: AppNotification = {
         id: `notif-auth-denied-${Date.now()}`,
@@ -531,6 +558,9 @@ export default function App() {
     syncComplaints()
     syncOverlaps()
     syncSettings()
+    if (role !== 'Complainant') {
+      syncUsers()
+    }
   }
 
   const handleUpdateSettings = async (
