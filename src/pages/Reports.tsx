@@ -26,7 +26,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import type { Complaint } from '../types'
-import { BUREAUS, BUREAU_INFO, STATUSES, TODAY, instName } from '../data'
+import { BUREAUS, BUREAU_INFO, STATUSES, TODAY, instName, resolveOfficerName } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle } from '../components/ui'
 
 const PALETTE = ['#0b2250', '#1d4a94', '#0d9488', '#f59e0b', '#dc2626', '#8b5cf6', '#64748b']
@@ -109,7 +109,7 @@ export default function Reports({ complaints }: { complaints: Complaint[] }) {
       c.bureau,
       c.category,
       c.priority,
-      c.officer,
+      resolveOfficerName(c),
       c.status,
       c.date,
       c.due,

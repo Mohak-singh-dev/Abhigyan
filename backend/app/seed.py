@@ -13,6 +13,8 @@ from app.models.institution import Institution
 from app.models.user import User
 from app.models.complaint import Complaint
 from app.models.timeline import ComplaintTimeline
+from app.models.overlap import ComplaintOverlap
+from app.models.setting import SystemSetting
 from app.config import settings
 from app.auth import hash_password
 
@@ -625,13 +627,149 @@ def seed_demo_data(db: Session) -> None:
                 ))
             timeline_count += 1
 
+    overlap_count = 0
+    demo_overlaps_data = [
+        {
+            "id": "o1",
+            "complaint_a_id": "RB-2026-0141",
+            "complaint_b_id": "PGRC-2026-0873",
+            "similarity": 94,
+            "reasons": [
+                "Same Institution: Sunrise Institute of Technology (Pune)",
+                "Both complaints cite excessive tuition fee demands and unapproved development levies",
+                "Both submitted within 4 calendar days of each other",
+                'Matching keywords: "tuition fee", "approved fee cap", "development charges"',
+            ],
+            "status": "open",
+        },
+        {
+            "id": "o2",
+            "complaint_a_id": "RB-2026-0152",
+            "complaint_b_id": "PGRC-2026-0890",
+            "similarity": 88,
+            "reasons": [
+                "Same Institution: Bharat College of Engineering (Lucknow)",
+                "Shared Department: Computer Science & Engineering (CSE)",
+                "RB complaint concerns faculty roster/cadre shortfall; PGRC complaint details stalled lab lectures caused by that exact vacancy",
+                "Direct causal link between regulatory non-compliance and student grievance",
+            ],
+            "status": "linked",
+            "justification": "Confirmed by Bureau Admin on 2026-10-22: Shared faculty vacancy verified.",
+        },
+        {
+            "id": "o3",
+            "complaint_a_id": "RB-2026-0171",
+            "complaint_b_id": "PGRC-2026-0902",
+            "similarity": 91,
+            "reasons": [
+                "Same Institution: National Institute of Management Studies (Bengaluru)",
+                "Shared Category: Admission Irregularities in MBA program",
+                "Matching evidence: Unapproved intake extension coincides with direct donation demands",
+                "Filed within 24 hours of each other",
+            ],
+            "status": "open",
+        },
+        {
+            "id": "o4",
+            "complaint_a_id": "RB-2026-0180",
+            "complaint_b_id": "PGRC-2026-0921",
+            "similarity": 92,
+            "reasons": [
+                "Same Institution: Apex Institute of Pharmacy (Ahmedabad)",
+                "Shared Category: Curriculum & Examination Standards",
+                "Non-compliance with statutory PCI syllabus matches student marks delay complaints",
+            ],
+            "status": "linked",
+            "justification": "Confirmed by Bureau Admin on 2026-10-23: Joint show-cause scheduled for unapproved degrees.",
+        },
+        {
+            "id": "o5",
+            "complaint_a_id": "RB-2026-0195",
+            "complaint_b_id": "PGRC-2026-0940",
+            "similarity": 78,
+            "reasons": [
+                "Same Institution: Heritage Institute of Technology (Kolkata)",
+                "Fee Regulation vs Library facility inspection",
+            ],
+            "status": "dismissed",
+            "justification": "Dismissed on 2026-10-24: Different topics (fee vs library norms).",
+        },
+        {
+            "id": "o6",
+            "complaint_a_id": "AB-2026-0310",
+            "complaint_b_id": "PGRC-2026-0955",
+            "similarity": 82,
+            "reasons": [
+                "Same Institution: Vidya Polytechnic Institute (Jaipur)",
+                "Approval Bureau infrastructure scrutiny matches lab safety grievance",
+            ],
+            "status": "open",
+        },
+        {
+            "id": "o7",
+            "complaint_a_id": "ACD-2026-0044",
+            "complaint_b_id": "PGRC-2026-0968",
+            "similarity": 71,
+            "reasons": [
+                "Same Institution: Modern Institute of Architecture (Bhopal)",
+                "Hostel facility vs Faculty roster",
+            ],
+            "status": "dismissed",
+            "justification": "Dismissed on 2026-10-25: Unrelated departments (hostel ragging vs faculty roster).",
+        },
+        {
+            "id": "o8",
+            "complaint_a_id": "RB-2026-0210",
+            "complaint_b_id": "PGRC-2026-0985",
+            "similarity": 89,
+            "reasons": [
+                "Same Institution: St. Xavier College of Engineering (Mumbai)",
+                "Excess fee collection and mandatory non-refundable deposits",
+            ],
+            "status": "open",
+        },
+    ]
+
+    for ov_data in demo_overlaps_data:
+        existing_ov = db.query(ComplaintOverlap).filter(ComplaintOverlap.id == ov_data["id"]).first()
+        if not existing_ov:
+            # Check complaints exist
+            c_a = db.query(Complaint).filter(Complaint.id == ov_data["complaint_a_id"]).first()
+            c_b = db.query(Complaint).filter(Complaint.id == ov_data["complaint_b_id"]).first()
+            if c_a and c_b:
+                db.add(ComplaintOverlap(
+                    id=ov_data["id"],
+                    complaint_a_id=ov_data["complaint_a_id"],
+                    complaint_b_id=ov_data["complaint_b_id"],
+                    similarity=ov_data["similarity"],
+                    reasons=ov_data["reasons"],
+                    status=ov_data["status"],
+                    decision_state=ov_data["status"] if ov_data["status"] != "open" else None,
+                    justification=ov_data.get("justification"),
+                ))
+    # Seed default global system settings if missing
+    existing_setting = db.query(SystemSetting).filter(SystemSetting.key == "global").first()
+    if not existing_setting:
+        db.add(SystemSetting(
+            key="global",
+            similarity_threshold=75,
+            sla_critical=3,
+            sla_high=7,
+            sla_medium=14,
+            auto_escalate=True,
+            email_alerts=True,
+            updated_by="System Initialization Seed",
+        ))
+        logger.info("Seeded default global system settings (threshold: 75%, SLAs: 3/7/14).")
+
     db.commit()
     logger.info(
-        "Idempotent seed complete! Added %d new institutions, %d new users, %d new complaints, seeded timelines for %d complaints.",
+        "Idempotent seed complete! Added %d new institutions, %d new users, %d new complaints, seeded timelines for %d complaints, %d overlaps.",
         inst_count,
         user_count,
         complaint_count,
-        timeline_count
+        timeline_count,
+        overlap_count,
     )
 
 if __name__ == "__main__":

@@ -451,6 +451,18 @@ export const initialComplaints: Complaint[] = rawRows.map(
       category,
       priority,
       officer,
+      assignedUserId:
+        officer === 'Anita Verma'
+          ? 'u3'
+          : officer === 'Rajesh Kumar'
+          ? 'u2'
+          : officer === 'Meera Iyer'
+          ? 'u4'
+          : officer === 'Suresh Patel'
+          ? 'u5'
+          : officer === 'Dr. Arun Sharma'
+          ? 'u6'
+          : undefined,
       status,
       date,
       due,
@@ -506,6 +518,49 @@ export const initialComplaints: Complaint[] = rawRows.map(
     }
   }
 )
+
+export type OverlapReviewState = 'linked' | 'dismissed' | 'deferred'
+
+/**
+ * Resolves the effective review state of an overlap, prioritizing session/persisted state,
+ * followed by any authoritative backend or initial decision, defaulting to 'open'.
+ */
+export function getOverlapEffectiveState(
+  overlap: Overlap,
+  states?: Record<string, OverlapReviewState | undefined>
+): OverlapReviewState | 'open' {
+  if (states && states[overlap.id]) {
+    return states[overlap.id]!
+  }
+  if (overlap.status && overlap.status !== 'open' && overlap.status !== 'pending') {
+    return overlap.status as OverlapReviewState
+  }
+  return 'open'
+}
+
+/**
+ * Determines whether an overlap represents a historical decision (Confirmed Related, Dismissed, or Deferred).
+ */
+export function isOverlapHistorical(
+  overlap: Overlap,
+  states?: Record<string, OverlapReviewState | undefined>
+): boolean {
+  const effective = getOverlapEffectiveState(overlap, states)
+  return effective === 'linked' || effective === 'dismissed' || effective === 'deferred'
+}
+
+/**
+ * Determines whether an overlap is an active pending candidate in the review queue.
+ * Historical decisions NEVER count as pending. Only unreviewed open candidates meeting the threshold qualify.
+ */
+export function isOverlapActivePending(
+  overlap: Overlap,
+  states: Record<string, OverlapReviewState | undefined> | undefined,
+  threshold: number
+): boolean {
+  const effective = getOverlapEffectiveState(overlap, states)
+  return effective === 'open' && overlap.similarity >= threshold
+}
 
 export const overlaps: Overlap[] = [
   {
@@ -862,7 +917,7 @@ export const getOfficersForBureau = (bureau: Bureau | 'All'): string[] => {
 
 // Permitted status transitions per workflow rules
 export const PERMITTED_STATUS_TRANSITIONS: Record<Status, Status[]> = {
-  Pending: ['In Progress'],
+  Pending: ['In Progress', 'Escalated'],
   'In Progress': ['Escalated', 'Resolved'],
   Escalated: ['In Progress', 'Resolved'],
   Resolved: [],
@@ -948,7 +1003,8 @@ export const canTransferBureau = (
 export const canUpdateCaseStatus = (
   user: UserProfile | undefined,
   complaint: Complaint,
-  targetStatus: Status
+  targetStatus: Status,
+  overrideReason?: string
 ): PermissionCheckResult => {
   if (!user) {
     return { allowed: false, reason: 'Authentication required.' }
@@ -959,9 +1015,33 @@ export const canUpdateCaseStatus = (
       reason: 'Complainants cannot modify official docket status.',
     }
   }
-  if (user.role === 'Admin') {
-    return { allowed: true }
+
+  if (complaint.status === targetStatus) {
+    return {
+      allowed: false,
+      reason: `Complaint is already in '${targetStatus}' status.`,
+    }
   }
+
+  const permitted = PERMITTED_STATUS_TRANSITIONS[complaint.status] || []
+  const isPermitted = permitted.includes(targetStatus)
+
+  if (user.role === 'Admin') {
+    // Normal permitted transitions are allowed without override
+    if (isPermitted && complaint.status !== 'Resolved') {
+      return { allowed: true }
+    }
+    // Re-opening from Resolved or non-permitted transitions require explicit override justification
+    const cleanOverride = (overrideReason || '').trim()
+    if (cleanOverride) {
+      return { allowed: true }
+    }
+    return {
+      allowed: false,
+      reason: `Status transition from "${complaint.status}" to "${targetStatus}" is not permitted under normal workflow rules. System Admin may override by providing an explicit override reason.`,
+    }
+  }
+
   if (user.role === 'BureauAdmin') {
     if (user.bureau !== 'All' && complaint.bureau !== user.bureau) {
       return {
@@ -969,11 +1049,29 @@ export const canUpdateCaseStatus = (
         reason: `Restricted: Docket belongs to ${complaint.bureau}; your administrative jurisdiction is ${user.bureau}.`,
       }
     }
+    if (complaint.status === 'Resolved') {
+      return {
+        allowed: false,
+        reason: 'Case is Resolved and closed. Status transitions from "Resolved" are not permitted under normal workflow rules.',
+      }
+    }
+    if (!isPermitted) {
+      return {
+        allowed: false,
+        reason: `Status transition from "${complaint.status}" to "${targetStatus}" is not permitted. Permitted transitions: ${
+          permitted.length > 0 ? permitted.join(', ') : 'None (Case Closed)'
+        }.`,
+      }
+    }
     return { allowed: true }
   }
+
   if (user.role === 'Officer') {
     // 1. Authorized case check - Officer can only mutate explicitly assigned cases
-    const isAssigned = complaint.officer === user.name
+    const isAssigned =
+      complaint.officer === user.name ||
+      resolveOfficerName(complaint) === user.name ||
+      Boolean(user.id && complaint.assignedUserId === user.id)
     if (!isAssigned) {
       return {
         allowed: false,
@@ -981,9 +1079,15 @@ export const canUpdateCaseStatus = (
       }
     }
 
+    if (complaint.status === 'Resolved') {
+      return {
+        allowed: false,
+        reason: 'Case is Resolved and closed. Status transitions from "Resolved" are not permitted.',
+      }
+    }
+
     // 2. Permitted transition check
-    const permitted = PERMITTED_STATUS_TRANSITIONS[complaint.status] || []
-    if (!permitted.includes(targetStatus)) {
+    if (!isPermitted) {
       return {
         allowed: false,
         reason: `Status transition from "${complaint.status}" to "${targetStatus}" is not permitted for Handling Officers. Allowed next: ${
@@ -994,6 +1098,56 @@ export const canUpdateCaseStatus = (
     return { allowed: true }
   }
   return { allowed: false, reason: 'Unauthorized role.' }
+}
+
+/**
+ * Resolves the authoritative display name of the assigned investigating officer.
+ * Uses persisted assignedUserId and authoritative user profiles as source of truth.
+ * Returns safe neutral fallbacks ('Unassigned' or 'Unknown Officer').
+ * Explicitly prevents falling back to 'Reassigned Officer'.
+ */
+export const resolveOfficerName = (
+  complaint?: { officer?: string; assignedUserId?: string } | null,
+  users: UserProfile[] = userProfiles
+): string => {
+  if (!complaint) return 'Unassigned'
+
+  // 1. Authoritative resolution via assignedUserId
+  if (complaint.assignedUserId && complaint.assignedUserId.trim()) {
+    const uid = complaint.assignedUserId.trim()
+    const matched =
+      users.find((u) => u.id === uid) ||
+      userProfiles.find((u) => u.id === uid)
+    if (matched?.name) return matched.name
+
+    // If assignedUserId was explicitly set but does not match any known profile
+    const rawOfficer = complaint.officer?.trim()
+    if (rawOfficer) {
+      const lower = rawOfficer.toLowerCase()
+      if (lower !== 'reassigned officer' && lower !== 'unassigned' && lower !== 'unknown officer') {
+        const matchedByName =
+          users.find((u) => u.name.toLowerCase() === lower) ||
+          userProfiles.find((u) => u.name.toLowerCase() === lower)
+        if (matchedByName?.name) return matchedByName.name
+      }
+    }
+    return 'Unknown Officer'
+  }
+
+  // 2. Resolution via officer name string
+  const raw = complaint.officer?.trim()
+  if (raw) {
+    const lower = raw.toLowerCase()
+    if (lower !== 'reassigned officer' && lower !== 'unassigned' && lower !== 'unknown officer') {
+      const matchedByName =
+        users.find((u) => u.name.toLowerCase() === lower) ||
+        userProfiles.find((u) => u.name.toLowerCase() === lower)
+      if (matchedByName?.name) return matchedByName.name
+      return raw
+    }
+  }
+
+  return 'Unassigned'
 }
 
 /**
@@ -1013,7 +1167,13 @@ export const canViewComplaint = (
     }
   }
   if (user.role === 'Officer') {
-    if (complaint.officer === user.name) return { allowed: true }
+    if (
+      complaint.officer === user.name ||
+      resolveOfficerName(complaint) === user.name ||
+      Boolean(user.id && complaint.assignedUserId === user.id)
+    ) {
+      return { allowed: true }
+    }
     return {
       allowed: false,
       reason: `Handling Officer is neither assigned to docket ${complaint.id} nor authorized to access unassigned cases.`,
@@ -1052,7 +1212,13 @@ export const canAddCaseRemarks = (
     }
   }
   if (user.role === 'Officer') {
-    if (complaint.officer === user.name) return { allowed: true }
+    if (
+      complaint.officer === user.name ||
+      resolveOfficerName(complaint) === user.name ||
+      Boolean(user.id && complaint.assignedUserId === user.id)
+    ) {
+      return { allowed: true }
+    }
     return {
       allowed: false,
       reason: `Restricted: Handling Officer is neither assigned to docket ${complaint.id} nor authorized to add remarks to unassigned cases.`,
@@ -1098,4 +1264,111 @@ export const canReviewReassignmentRequest = (
     }
   }
   return { allowed: false, reason: 'Handling Officers and Complainants cannot decide reassignment requests.' }
+}
+
+/**
+ * Scopes notifications prior to rendering.
+ * Prevents unauthorized notification exposure, wrong unread counts, and cross-user leaks.
+ *
+ * Rules:
+ * - Complainants: only explicitly addressed to their authenticated user ID/email or linked to an authorized complaint.
+ * - Officers: only cases assigned to them, plus permitted internal notices within their Bureau.
+ * - Bureau Admins: only notifications for their authorized Bureau.
+ * - System Admin: system-wide notifications.
+ */
+export const isNotificationAuthorized = (
+  user: UserProfile | undefined | null,
+  notification: AppNotification,
+  complaints: Complaint[]
+): boolean => {
+  if (!user) return false
+
+  // 1. Explicit user/email targeting checks
+  if (notification.recipientUserId && notification.recipientUserId !== user.id) {
+    return false
+  }
+  if (
+    notification.recipientEmail &&
+    user.email &&
+    notification.recipientEmail.trim().toLowerCase() !== user.email.trim().toLowerCase()
+  ) {
+    return false
+  }
+
+  // 2. Explicit targetRole check
+  if (notification.targetRole && notification.targetRole !== 'All' && user.role !== notification.targetRole) {
+    return false
+  }
+
+  // 3. If notification relates to a specific complaint caseId
+  if (notification.caseId) {
+    const targetComplaint = complaints.find((c) => c.id.toUpperCase() === notification.caseId?.toUpperCase())
+    if (targetComplaint) {
+      return canViewComplaint(user, targetComplaint).allowed
+    }
+    // Case not found in active complaints: only System Admin can view orphan system notifications
+    return user.role === 'Admin'
+  }
+
+  // 4. Non-case notifications
+  // System Admin receives all system-wide notifications
+  if (user.role === 'Admin') return true
+
+  // Complainants must only see notifications explicitly addressed to their authenticated user ID/email
+  if (user.role === 'Complainant') {
+    return Boolean(
+      (notification.recipientUserId && notification.recipientUserId === user.id) ||
+      (notification.recipientEmail && user.email && notification.recipientEmail.trim().toLowerCase() === user.email.trim().toLowerCase())
+    )
+  }
+
+  // Bureau Admins must only see notifications for their authorized Bureau
+  if (user.role === 'BureauAdmin') {
+    if (user.bureau === 'All') return true
+    if (notification.bureau && notification.bureau !== 'All') {
+      return notification.bureau.toUpperCase() === user.bureau.toUpperCase()
+    }
+    return false
+  }
+
+  // Officers must only see permitted internal notices within their Bureau
+  if (user.role === 'Officer') {
+    if (user.bureau && user.bureau !== 'All' && notification.bureau && notification.bureau !== 'All') {
+      return notification.bureau.toUpperCase() === user.bureau.toUpperCase()
+    }
+    return false
+  }
+
+  return false
+}
+
+export const getNotificationStorageKey = (userId?: string): string => {
+  return userId ? `abhigyan_notifications_${userId}` : 'abhigyan_notifications_anonymous'
+}
+
+export const loadUserNotifications = (userId?: string): AppNotification[] => {
+  if (!userId) return initialNotifications
+  try {
+    const key = getNotificationStorageKey(userId)
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+      }
+    }
+  } catch {
+    // Malformed JSON fallback
+  }
+  return initialNotifications
+}
+
+export const saveUserNotifications = (userId: string, notifs: AppNotification[]): void => {
+  if (!userId || typeof localStorage === 'undefined') return
+  try {
+    const key = getNotificationStorageKey(userId)
+    localStorage.setItem(key, JSON.stringify(notifs))
+  } catch {
+    // ignore
+  }
 }

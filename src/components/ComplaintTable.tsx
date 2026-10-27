@@ -12,13 +12,13 @@ import {
   User,
 } from 'lucide-react'
 import type { Complaint, Role, Status, UserProfile } from '../types'
-import { PERMITTED_STATUS_TRANSITIONS, STATUSES, canUpdateCaseStatus, fmt, getDaysRemaining, instName, isOverdue } from '../data'
+import { PERMITTED_STATUS_TRANSITIONS, STATUSES, canUpdateCaseStatus, fmt, getDaysRemaining, instName, isOverdue, resolveOfficerName } from '../data'
 import { Badge, Button } from './ui'
 
 interface ComplaintTableProps {
   rows: Complaint[]
   onOpen: (id: string) => void
-  onStatus?: (id: string, s: Status) => void
+  onStatus?: (id: string, s: Status, note?: string, overrideReason?: string) => Promise<{ success: boolean; error?: string } | void> | void
   compact?: boolean
   showActions?: boolean
   currentRole?: Role
@@ -231,9 +231,9 @@ export default function ComplaintTable({
                   <td className="whitespace-nowrap px-3 py-3 text-slate-700">
                     <div className="flex items-center gap-1.5">
                       <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-700">
-                        {c.officer.slice(0, 1)}
+                        {resolveOfficerName(c).slice(0, 1)}
                       </div>
-                      <span className="text-xs">{c.officer}</span>
+                      <span className="text-xs">{resolveOfficerName(c)}</span>
                     </div>
                   </td>
                 )}
@@ -243,36 +243,76 @@ export default function ComplaintTable({
                   className="whitespace-nowrap px-3 py-3"
                   onClick={(e) => onStatus && e.stopPropagation()}
                 >
-                  {onStatus &&
-                  currentRole !== 'Complainant' &&
-                  currentUser &&
-                  (currentUser.role === 'Admin' ||
-                    PERMITTED_STATUS_TRANSITIONS[c.status]?.some(
-                      (s) => canUpdateCaseStatus(currentUser, c, s).allowed
-                    )) ? (
-                    <select
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-2xs focus:border-navy-600 focus:outline-none"
-                      value={c.status}
-                      onChange={(e) => onStatus(c.id, e.target.value as Status)}
-                    >
-                      <option value={c.status}>{c.status}</option>
-                      {currentUser.role === 'Admin'
-                        ? STATUSES.filter((s) => s !== c.status).map((s) => (
+                  {(() => {
+                    if (!onStatus || currentRole === 'Complainant' || !currentUser) {
+                      return <Badge v={c.status} />
+                    }
+
+                    const nextStatuses =
+                      currentUser.role === 'Admin'
+                        ? STATUSES.filter((s) => s !== c.status)
+                        : (PERMITTED_STATUS_TRANSITIONS[c.status] || []).filter(
+                            (s) => canUpdateCaseStatus(currentUser, c, s).allowed
+                          )
+
+                    if (nextStatuses.length === 0) {
+                      return <Badge v={c.status} />
+                    }
+
+                    return (
+                      <select
+                        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-2xs focus:border-navy-600 focus:outline-none"
+                        value={c.status}
+                        onChange={async (e) => {
+                          const newStatus = e.target.value as Status
+                          if (newStatus === c.status) return
+
+                          const isOverride =
+                            currentUser.role === 'Admin' &&
+                            (!PERMITTED_STATUS_TRANSITIONS[c.status]?.includes(newStatus) || c.status === 'Resolved')
+
+                          if (isOverride) {
+                            const reason = window.prompt(
+                              `[System Admin Override] Changing Case ${c.id} from ${c.status} to ${newStatus} bypasses normal workflow.\n\nPlease enter the mandatory statutory override reason:`
+                            )
+                            if (!reason || !reason.trim()) {
+                              alert('Status update cancelled: an explicit override reason is mandatory for System Admin override.')
+                              return
+                            }
+                            try {
+                              const res = await onStatus(c.id, newStatus, undefined, reason.trim())
+                              if (res && typeof res === 'object' && res.success === false) {
+                                alert(`Status update failed: ${res.error}`)
+                              }
+                            } catch (err: unknown) {
+                              alert(`Status update failed: ${err instanceof Error ? err.message : String(err)}`)
+                            }
+                          } else {
+                            try {
+                              const res = await onStatus(c.id, newStatus)
+                              if (res && typeof res === 'object' && res.success === false) {
+                                alert(`Status update failed: ${res.error}`)
+                              }
+                            } catch (err: unknown) {
+                              alert(`Status update failed: ${err instanceof Error ? err.message : String(err)}`)
+                            }
+                          }
+                        }}
+                      >
+                        <option value={c.status}>{c.status} (Current)</option>
+                        {nextStatuses.map((s) => {
+                          const isOverride =
+                            currentUser.role === 'Admin' &&
+                            (!PERMITTED_STATUS_TRANSITIONS[c.status]?.includes(s) || c.status === 'Resolved')
+                          return (
                             <option key={s} value={s}>
-                              {s}
+                              {s} {isOverride ? '(Override)' : ''}
                             </option>
-                          ))
-                        : (PERMITTED_STATUS_TRANSITIONS[c.status] || [])
-                            .filter((s) => canUpdateCaseStatus(currentUser, c, s).allowed)
-                            .map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                    </select>
-                  ) : (
-                    <Badge v={c.status} />
-                  )}
+                          )
+                        })}
+                      </select>
+                    )
+                  })()}
                 </td>
 
                 {/* Due Date & SLA countdown */}

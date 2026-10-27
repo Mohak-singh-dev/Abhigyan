@@ -28,7 +28,17 @@ import {
   XCircle,
 } from 'lucide-react'
 import type { Complaint, Overlap, Role, UserProfile } from '../types'
-import { TODAY, fmt, instName, overlaps as initialOverlaps } from '../data'
+import {
+  TODAY,
+  fmt,
+  instName,
+  overlaps as initialOverlaps,
+  resolveOfficerName,
+  getOverlapEffectiveState,
+  isOverlapHistorical,
+  isOverlapActivePending,
+  type OverlapReviewState,
+} from '../data'
 import { Badge, Button, Card, CardHeader, Modal, PageTitle, SearchBox } from '../components/ui'
 
 export const OVERLAP_STORAGE_KEYS = {
@@ -36,7 +46,7 @@ export const OVERLAP_STORAGE_KEYS = {
   NOTES: 'abhigyan_overlap_notes',
 } as const
 
-export type OverlapReviewState = 'linked' | 'dismissed' | 'deferred'
+export type { OverlapReviewState }
 export type OverlapStatusDisplay = OverlapReviewState | 'open'
 
 export const DEFAULT_OVERLAP_STATES: Record<string, OverlapReviewState | undefined> = {
@@ -46,17 +56,25 @@ export const DEFAULT_OVERLAP_STATES: Record<string, OverlapReviewState | undefin
   o7: 'dismissed',
 }
 
+export {
+  getOverlapEffectiveState,
+  isOverlapHistorical,
+  isOverlapActivePending,
+}
+
 interface OverlapsProps {
   complaints: Complaint[]
   onOpen: (id: string) => void
   currentRole?: Role
   currentUser?: UserProfile
+  overlaps?: Overlap[]
   overlapStates?: Record<string, OverlapReviewState | undefined>
+  similarityThreshold?: number
   onUpdateOverlapState?: (
     id: string,
     state: OverlapReviewState | null,
     note?: string
-  ) => void
+  ) => Promise<boolean> | void
 }
 
 export default function Overlaps({
@@ -64,9 +82,15 @@ export default function Overlaps({
   onOpen,
   currentRole = 'Admin',
   currentUser,
+  overlaps: propOverlaps,
   overlapStates: propOverlapStates,
+  similarityThreshold = 75,
   onUpdateOverlapState,
 }: OverlapsProps) {
+  const allOverlaps = propOverlaps || initialOverlaps
+  const activeThreshold = similarityThreshold
+  const [showBelowThreshold, setShowBelowThreshold] = useState<boolean>(false)
+
   // Local state initialized from localStorage
   const [internalStates, setInternalStates] = useState<Record<string, OverlapReviewState | undefined>>(() => {
     try {
@@ -109,6 +133,8 @@ export default function Overlaps({
   // Review Modal State (Side-by-Side comparison)
   const [reviewingOverlapId, setReviewingOverlapId] = useState<string | null>(null)
   const [reviewerModalNote, setReviewerModalNote] = useState<string>('')
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Sync to localStorage
   useEffect(() => {
@@ -130,39 +156,79 @@ export default function Overlaps({
   const getComplaint = (id: string) => complaints.find((c) => c.id === id)
 
   // Actions: Confirm Related, Dismiss Match, Defer, Reset
-  const handleConfirm = (id: string, note?: string) => {
-    const finalNote = note || `Confirmed by ${currentUser?.name || 'Officer'} on ${TODAY}`
+  const handleConfirm = async (id: string, note?: string) => {
+    setSavingId(id)
+    setActionError(null)
+    const finalNote = note?.trim() || `Confirmed by ${currentUser?.name || 'Officer'} on ${TODAY}`
+    let success = true
     if (onUpdateOverlapState) {
-      onUpdateOverlapState(id, 'linked', finalNote)
+      const res = await onUpdateOverlapState(id, 'linked', finalNote)
+      if (res === false) {
+        success = false
+        setActionError('Failed to confirm overlap on server. Verify your Bureau Admin or System Admin permissions.')
+      }
     } else {
       setInternalStates((prev) => ({ ...prev, [id]: 'linked' }))
     }
-    setOverlapNotes((prev) => ({ ...prev, [id]: finalNote }))
+    setSavingId(null)
+    if (success) {
+      setOverlapNotes((prev) => ({ ...prev, [id]: finalNote }))
+      setReviewingOverlapId(null)
+    }
   }
 
-  const handleDismiss = (id: string, note?: string) => {
-    const finalNote = note || `Dismissed as independent by ${currentUser?.name || 'Officer'} on ${TODAY}`
+  const handleDismiss = async (id: string, note?: string) => {
+    setSavingId(id)
+    setActionError(null)
+    const finalNote = note?.trim() || `Dismissed as independent by ${currentUser?.name || 'Officer'} on ${TODAY}`
+    let success = true
     if (onUpdateOverlapState) {
-      onUpdateOverlapState(id, 'dismissed', finalNote)
+      const res = await onUpdateOverlapState(id, 'dismissed', finalNote)
+      if (res === false) {
+        success = false
+        setActionError('Failed to dismiss overlap on server.')
+      }
     } else {
       setInternalStates((prev) => ({ ...prev, [id]: 'dismissed' }))
     }
-    setOverlapNotes((prev) => ({ ...prev, [id]: finalNote }))
+    setSavingId(null)
+    if (success) {
+      setOverlapNotes((prev) => ({ ...prev, [id]: finalNote }))
+      setReviewingOverlapId(null)
+    }
   }
 
-  const handleDefer = (id: string, note?: string) => {
-    const finalNote = note || `Deferred for inquiry evidence by ${currentUser?.name || 'Officer'} on ${TODAY}`
+  const handleDefer = async (id: string, note?: string) => {
+    setSavingId(id)
+    setActionError(null)
+    const finalNote = note?.trim() || `Deferred for inquiry evidence by ${currentUser?.name || 'Officer'} on ${TODAY}`
+    let success = true
     if (onUpdateOverlapState) {
-      onUpdateOverlapState(id, 'deferred', finalNote)
+      const res = await onUpdateOverlapState(id, 'deferred', finalNote)
+      if (res === false) {
+        success = false
+        setActionError('Failed to defer overlap on server.')
+      }
     } else {
       setInternalStates((prev) => ({ ...prev, [id]: 'deferred' }))
     }
-    setOverlapNotes((prev) => ({ ...prev, [id]: finalNote }))
+    setSavingId(null)
+    if (success) {
+      setOverlapNotes((prev) => ({ ...prev, [id]: finalNote }))
+      setReviewingOverlapId(null)
+    }
   }
 
-  const handleReset = (id: string) => {
+  const handleReset = async (id: string) => {
+    setSavingId(id)
+    setActionError(null)
+    let success = true
     if (onUpdateOverlapState) {
-      onUpdateOverlapState(id, null)
+      const res = await onUpdateOverlapState(id, null)
+      if (res === false) {
+        success = false
+        setActionError('Failed to reset overlap on server.')
+      }
     } else {
       setInternalStates((prev) => {
         const copy = { ...prev }
@@ -170,35 +236,49 @@ export default function Overlaps({
         return copy
       })
     }
-    setOverlapNotes((prev) => {
-      const copy = { ...prev }
-      delete copy[id]
-      return copy
-    })
+    setSavingId(null)
+    if (success) {
+      setOverlapNotes((prev) => {
+        const copy = { ...prev }
+        delete copy[id]
+        return copy
+      })
+      setReviewingOverlapId(null)
+    }
   }
 
   const handleOpenReviewModal = (id: string) => {
+    setActionError(null)
     setReviewingOverlapId(id)
     setReviewerModalNote(overlapNotes[id] || '')
   }
 
+  const isAuthorizedRole = currentRole === 'Admin'
+
   // Active Review Modal Target
-  const activeReviewOverlap = initialOverlaps.find((o) => o.id === reviewingOverlapId)
+  const activeReviewOverlap = allOverlaps.find((o) => o.id === reviewingOverlapId)
   const activeCaseA = activeReviewOverlap ? getComplaint(activeReviewOverlap.a) : null
   const activeCaseB = activeReviewOverlap ? getComplaint(activeReviewOverlap.b) : null
 
   // Filtered List calculation
   const filteredOverlaps = useMemo(() => {
-    return initialOverlaps.filter((overlap) => {
+    return allOverlaps.filter((overlap) => {
       const compA = getComplaint(overlap.a)
       const compB = getComplaint(overlap.b)
       if (!compA || !compB) return false
 
       // Status filter
-      const currentState = overlapStates[overlap.id] || 'open'
+      const currentState = getOverlapEffectiveState(overlap, overlapStates)
       if (statusFilter !== 'All') {
-        if (statusFilter === 'open' && overlapStates[overlap.id]) return false
+        if (statusFilter === 'open' && currentState !== 'open') return false
         if (statusFilter !== 'open' && currentState !== statusFilter) return false
+      }
+
+      // Threshold gating for unreviewed candidates:
+      // Open candidates below activeThreshold are suppressed unless showBelowThreshold is true.
+      // Historical decisions (linked, dismissed, deferred) are ALWAYS preserved regardless of threshold.
+      if (currentState === 'open' && overlap.similarity < activeThreshold && !showBelowThreshold) {
+        return false
       }
 
       // Bureau filter (Case A or Case B matches)
@@ -240,14 +320,17 @@ export default function Overlaps({
 
       return true
     })
-  }, [initialOverlaps, complaints, overlapStates, statusFilter, bureauFilter, similarityFilter, searchQuery])
+  }, [allOverlaps, complaints, overlapStates, statusFilter, bureauFilter, similarityFilter, searchQuery, activeThreshold, showBelowThreshold])
 
-  // Overview Counts
-  const totalCount = initialOverlaps.length
-  const pendingCount = initialOverlaps.filter((o) => !overlapStates[o.id]).length
-  const confirmedCount = initialOverlaps.filter((o) => overlapStates[o.id] === 'linked').length
-  const dismissedCount = initialOverlaps.filter((o) => overlapStates[o.id] === 'dismissed').length
-  const deferredCount = initialOverlaps.filter((o) => overlapStates[o.id] === 'deferred').length
+  // Overview Counts (Threshold-aware, distinguishing active review queue from historical decisions)
+  const pendingCount = allOverlaps.filter((o) => isOverlapActivePending(o, overlapStates, activeThreshold)).length
+  const confirmedCount = allOverlaps.filter((o) => getOverlapEffectiveState(o, overlapStates) === 'linked').length
+  const dismissedCount = allOverlaps.filter((o) => getOverlapEffectiveState(o, overlapStates) === 'dismissed').length
+  const deferredCount = allOverlaps.filter((o) => getOverlapEffectiveState(o, overlapStates) === 'deferred').length
+  const belowThresholdCount = allOverlaps.filter((o) => getOverlapEffectiveState(o, overlapStates) === 'open' && o.similarity < activeThreshold).length
+  const totalCount = showBelowThreshold
+    ? allOverlaps.length
+    : pendingCount + confirmedCount + dismissedCount + deferredCount
 
   return (
     <div className="space-y-6">
@@ -257,13 +340,43 @@ export default function Overlaps({
         sub="Corroboration matching to surface parallel grievances across Regulation Bureau (RB), Public Grievance Cell (PGRC), and Approval Bureau"
         tag="Cross-Bureau Engine"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-lg bg-navy-50 px-3 py-1.5 text-xs font-semibold text-navy-800 border border-navy-200">
+              Active Threshold: {activeThreshold}%
+            </span>
+            {belowThresholdCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowBelowThreshold((v) => !v)}
+                className="rounded-lg bg-slate-100 hover:bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 border border-slate-200 transition"
+              >
+                {showBelowThreshold ? 'Hide' : 'Show'} Suppressed ({belowThresholdCount} &lt;{activeThreshold}%)
+              </button>
+            )}
             <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 border border-slate-200">
-              Precomputed Synthetic Heuristic Index (Mock)
+              Precomputed Heuristic Index
             </span>
           </div>
         }
       />
+
+      {/* Action Error Banner */}
+      {actionError && (
+        <Card className="border-l-4 border-l-rose-600 bg-rose-50 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-rose-900 text-xs font-medium">
+              <AlertCircle size={16} className="text-rose-600 flex-shrink-0" />
+              <span>{actionError}</span>
+            </div>
+            <button
+              onClick={() => setActionError(null)}
+              className="text-xs text-rose-700 hover:text-rose-900 font-bold"
+            >
+              Dismiss
+            </button>
+          </div>
+        </Card>
+      )}
 
       {/* 1. CLEAR STATUTORY SAFEGUARD WARNING (CRITICAL REQUIREMENT) */}
       <Card className="border-l-4 border-l-rose-600 bg-gradient-to-r from-rose-50/70 via-rose-50/20 to-white p-4.5">
@@ -492,7 +605,7 @@ export default function Overlaps({
 
             const isHigh = overlap.similarity >= 85
             const isModerate = overlap.similarity >= 65 && overlap.similarity < 85
-            const state: OverlapStatusDisplay = overlapStates[overlap.id] || 'open'
+            const state: OverlapStatusDisplay = getOverlapEffectiveState(overlap, overlapStates)
             const note = overlapNotes[overlap.id]
 
             return (
@@ -590,6 +703,16 @@ export default function Overlaps({
                       <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-tight">
                         Match Score
                       </div>
+                      {overlap.similarity < activeThreshold && state === 'open' && (
+                        <div className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.5 rounded mt-0.5 border border-amber-200">
+                          Below Threshold (&lt;{activeThreshold}%)
+                        </div>
+                      )}
+                      {overlap.similarity < activeThreshold && state !== 'open' && (
+                        <div className="text-[9px] font-semibold text-slate-500 bg-slate-100 px-1 py-0.5 rounded mt-0.5 border border-slate-200">
+                          Historical Decision
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -727,11 +850,11 @@ export default function Overlaps({
                       variant="teal"
                       size="sm"
                       onClick={() => handleConfirm(overlap.id)}
-                      disabled={state === 'linked'}
+                      disabled={state === 'linked' || savingId === overlap.id || !isAuthorizedRole}
                       className="text-xs"
                     >
                       <Check size={13} />
-                      <span>Confirm Related</span>
+                      <span>{savingId === overlap.id ? 'Saving...' : 'Confirm Related'}</span>
                     </Button>
 
                     {/* Action 3: Dismiss Match */}
@@ -739,7 +862,7 @@ export default function Overlaps({
                       variant="outline"
                       size="sm"
                       onClick={() => handleDismiss(overlap.id)}
-                      disabled={state === 'dismissed'}
+                      disabled={state === 'dismissed' || savingId === overlap.id || !isAuthorizedRole}
                       className="text-xs text-slate-700"
                     >
                       <X size={13} />
@@ -751,7 +874,7 @@ export default function Overlaps({
                       variant="ghost"
                       size="sm"
                       onClick={() => handleDefer(overlap.id)}
-                      disabled={state === 'deferred'}
+                      disabled={state === 'deferred' || savingId === overlap.id || !isAuthorizedRole}
                       className="text-xs text-amber-800 hover:bg-amber-50"
                     >
                       <PauseCircle size={13} />
@@ -824,7 +947,7 @@ export default function Overlaps({
                 const compB = getComplaint(overlap.b)
                 if (!compA || !compB) return null
 
-                const state: OverlapStatusDisplay = overlapStates[overlap.id] || 'open'
+                const state: OverlapStatusDisplay = getOverlapEffectiveState(overlap, overlapStates)
                 const isHigh = overlap.similarity >= 85
 
                 return (
@@ -917,7 +1040,7 @@ export default function Overlaps({
                           variant="teal"
                           size="sm"
                           onClick={() => handleConfirm(overlap.id)}
-                          disabled={state === 'linked'}
+                          disabled={state === 'linked' || savingId === overlap.id || !isAuthorizedRole}
                           className="text-[11px] h-7 px-2"
                           title="Confirm Related"
                         >
@@ -927,7 +1050,7 @@ export default function Overlaps({
                           variant="outline"
                           size="sm"
                           onClick={() => handleDismiss(overlap.id)}
-                          disabled={state === 'dismissed'}
+                          disabled={state === 'dismissed' || savingId === overlap.id || !isAuthorizedRole}
                           className="text-[11px] h-7 px-2 text-slate-600"
                           title="Dismiss Match"
                         >
@@ -999,7 +1122,7 @@ export default function Overlaps({
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase">Assigned Officer</span>
-                    <span className="text-slate-800">{activeCaseA.officer}</span>
+                    <span className="text-slate-800">{resolveOfficerName(activeCaseA)}</span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase">Status</span>
@@ -1073,7 +1196,7 @@ export default function Overlaps({
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase">Assigned Officer</span>
-                    <span className="text-slate-800">{activeCaseB.officer}</span>
+                    <span className="text-slate-800">{resolveOfficerName(activeCaseB)}</span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase">Status</span>
@@ -1156,46 +1279,51 @@ export default function Overlaps({
               />
             </div>
 
+            {/* Error in modal if any */}
+            {actionError && (
+              <div className="rounded-lg bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-800 flex items-center gap-2">
+                <AlertCircle size={14} className="text-rose-600 flex-shrink-0" />
+                <span>{actionError}</span>
+              </div>
+            )}
+
             {/* MODAL DECISION BUTTONS */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-200">
               <div className="text-[11px] text-slate-500">
                 Reviewer: <strong>{currentUser?.name || 'Authorized Officer'}</strong> ({currentRole})
+                {!isAuthorizedRole && (
+                  <span className="ml-2 text-rose-600 font-semibold">(Requires System Admin or Bureau Admin role)</span>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="teal"
                   size="md"
-                  onClick={() => {
-                    handleConfirm(activeReviewOverlap.id, reviewerModalNote)
-                    setReviewingOverlapId(null)
-                  }}
+                  onClick={() => handleConfirm(activeReviewOverlap.id, reviewerModalNote)}
+                  disabled={savingId === activeReviewOverlap.id || !isAuthorizedRole}
                   className="text-xs font-bold"
                 >
                   <Check size={14} />
-                  <span>Confirm Related Match</span>
+                  <span>{savingId === activeReviewOverlap.id ? 'Persisting...' : 'Confirm Related Match'}</span>
                 </Button>
 
                 <Button
                   variant="outline"
                   size="md"
-                  onClick={() => {
-                    handleDismiss(activeReviewOverlap.id, reviewerModalNote)
-                    setReviewingOverlapId(null)
-                  }}
+                  onClick={() => handleDismiss(activeReviewOverlap.id, reviewerModalNote)}
+                  disabled={savingId === activeReviewOverlap.id || !isAuthorizedRole}
                   className="text-xs text-slate-700"
                 >
                   <X size={14} />
-                  <span>Dismiss as Independent</span>
+                  <span>{savingId === activeReviewOverlap.id ? 'Updating...' : 'Dismiss as Independent'}</span>
                 </Button>
 
                 <Button
                   variant="ghost"
                   size="md"
-                  onClick={() => {
-                    handleDefer(activeReviewOverlap.id, reviewerModalNote)
-                    setReviewingOverlapId(null)
-                  }}
+                  onClick={() => handleDefer(activeReviewOverlap.id, reviewerModalNote)}
+                  disabled={savingId === activeReviewOverlap.id || !isAuthorizedRole}
                   className="text-xs text-amber-800 hover:bg-amber-50"
                 >
                   <PauseCircle size={14} />

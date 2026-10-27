@@ -5,6 +5,8 @@ from app.routers.health import router as health_router
 from app.routers.institutions import router as institutions_router
 from app.routers.complaints import router as complaints_router
 from app.routers.auth import router as auth_router
+from app.routers.overlaps import router as overlaps_router
+from app.routers.settings import router as settings_router
 
 app = FastAPI(
     title="Abhigyan AICTE Complaint Monitoring & Tracking API",
@@ -28,6 +30,8 @@ app.include_router(health_router, prefix=settings.API_PREFIX)
 app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(institutions_router, prefix=settings.API_PREFIX)
 app.include_router(complaints_router, prefix=settings.API_PREFIX)
+app.include_router(overlaps_router, prefix=settings.API_PREFIX)
+app.include_router(settings_router, prefix=settings.API_PREFIX)
 
 @app.get("/", tags=["Root"])
 def root():

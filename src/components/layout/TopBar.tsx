@@ -30,7 +30,7 @@ interface TopBarProps {
   onMarkAllNotificationsRead: () => void
   currentUser: UserProfile
   currentRole: Role
-  onSelectRole: (role: Role) => void
+  onSelectRole: (role: Role, userId?: string) => void
   onSignOut?: () => void
   onSelectCase?: (caseId: string) => void
 }
@@ -202,7 +202,7 @@ export default function TopBar({
           >
             <Bell size={19} />
             {unreadNotifs.length > 0 && (
-              <span className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white shadow-xs animate-pulse">
+              <span className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white shadow-xs">
                 {unreadNotifs.length}
               </span>
             )}
@@ -342,25 +342,34 @@ export default function TopBar({
                     <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Switch Demo Role Perspective:
                     </div>
-                    {(['Complainant', 'BureauAdmin', 'Officer', 'Admin'] as Role[]).map((r) => (
-                      <button
-                        key={r}
-                        onClick={() => {
-                          onSelectRole(r)
-                          setShowProfileMenu(false)
-                        }}
-                        className={`flex w-full items-center justify-between rounded-lg px-3 py-1.5 hover:bg-slate-100 transition ${
-                          currentRole === r ? 'font-bold text-teal-800 bg-teal-50/50' : 'text-slate-700'
-                        }`}
-                      >
-                        <span>{roleNameMap[r]}</span>
-                        {currentRole === r && (
-                          <span className="text-[10px] bg-teal-100 text-teal-800 px-1.5 py-0.2 rounded font-mono">
-                            Active
-                          </span>
-                        )}
-                      </button>
-                    ))}
+                    {[
+                      { role: 'Complainant' as Role, label: 'Citizen (Rohit Sharma)', userId: 'u0' },
+                      { role: 'BureauAdmin' as Role, label: 'Bureau Head (Dr. Priya Nair - PGRC)', userId: 'u1b' },
+                      { role: 'Officer' as Role, label: 'Handling Officer (Rajesh Kumar - PGRC)', userId: 'u2' },
+                      { role: 'Officer' as Role, label: 'Handling Officer (Anita Verma - RB)', userId: 'u3' },
+                      { role: 'Admin' as Role, label: 'System Admin (Dr. S. Mehta)', userId: 'u1' },
+                    ].map((opt) => {
+                      const isCur = currentUser?.id === opt.userId || (currentRole === opt.role && !currentUser?.id)
+                      return (
+                        <button
+                          key={`${opt.role}-${opt.userId}`}
+                          onClick={() => {
+                            onSelectRole(opt.role, opt.userId)
+                            setShowProfileMenu(false)
+                          }}
+                          className={`flex w-full items-center justify-between rounded-lg px-3 py-1.5 hover:bg-slate-100 transition ${
+                            isCur ? 'font-bold text-teal-800 bg-teal-50/50' : 'text-slate-700'
+                          }`}
+                        >
+                          <span className="truncate">{opt.label}</span>
+                          {isCur && (
+                            <span className="text-[10px] bg-teal-100 text-teal-800 px-1.5 py-0.2 rounded font-mono shrink-0 ml-1">
+                              Active
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
 
                   {currentRole !== 'Complainant' && (

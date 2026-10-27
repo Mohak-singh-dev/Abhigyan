@@ -12,7 +12,7 @@ interface AppLayoutProps {
   onMarkAllNotificationsRead: () => void
   currentUser: UserProfile
   currentRole: Role
-  onSelectRole: (role: Role) => void
+  onSelectRole: (role: Role, userId?: string) => void
   onSignOut?: () => void
   pendingOverlapsCount: number
   onSelectCase?: (caseId: string) => void

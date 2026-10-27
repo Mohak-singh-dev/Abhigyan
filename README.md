@@ -7,6 +7,10 @@
 - **Repository:** [https://github.com/nooralam08/Abhigyan](https://github.com/nooralam08/Abhigyan)
 - **Primary Branch:** `main`
 
+A specialized governance portal prototype engineered for the All India Council for Technical Education (AICTE) to monitor, cross-reference, and track institution-related grievances across AICTE bureaus and cells—specifically highlighting the **Regulation Bureau (RB)** and the **Public Grievance Redressal Cell (PGRC)**.
+
+> **Demonstration Notice:** All complaint records, match scores, SLA thresholds, and resolution metrics in this prototype are demonstration data and do not represent verified AICTE policy, live records, or official government data.
+
 ---
 
 ## 1. System Overview & Architecture
@@ -22,27 +26,33 @@ graph TD
     DB[("PostgreSQL Database<br/>(Alembic Migrations)")]
     ML["NLP Classifier Service<br/>(TF-IDF + Logistic Regression)"]
     Rules["Statutory Routing Rules<br/>(Multi-Bureau Resolution)"]
+    Overlaps["Cross-Bureau Overlap Engine<br/>(Dynamic Thresholds & History)"]
+    Settings["Persistent System Settings<br/>(SLA & Sensitivity Sync)"]
 
     Client -->|REST & Bearer JWT| API
     API -->|ORM Transactions| DB
     API -->|Advisory Ingestion| ML
     ML -->|Category & Raw Probabilities| Rules
     Rules -->|Suggested Bureau & Review Flags| API
+    API -->|Overlap Queries & Reviews| Overlaps
+    API -->|Authoritative SLA & Settings| Settings
     API -->|Advisory Recommendations| Client
 ```
 
 ### Core Architecture Highlights
 
-1. **AI-Based Advisory Classification**: Real-time and debounced machine learning preview that analyzes complaint subject and narrative text. Predicts category, bureau, and statutory urgency without automatically forcing suggestions onto the complainant.
+1. **AI-Based Advisory Classification**: Real-time debounced machine learning preview that analyzes complaint subject and narrative text. Predicts category, bureau, and statutory urgency without automatically forcing suggestions onto the complainant.
 2. **Hybrid Bureau Routing Engine**: Combines statistical NLP (scikit-learn Logistic Regression) with AICTE administrative domain heuristics to map complaints to the correct Bureau (Approval, Regulation, PGRC, Academic, Skill, Executive Office).
-3. **Fine-Grained Role-Based Access Control (RBAC)**: Enforces strict data isolation among 4 distinct role tiers:
-   - **Super Admin**: System-wide authority, cross-bureau reassignment, policy settings, analytics.
-   - **Bureau Admin**: Scoped strictly to cases within their authorized Bureau jurisdiction.
-   - **Handling Officer**: Scoped to assigned dockets or their Bureau cell; drives investigation lifecycle.
+3. **Cross-Bureau Overlap Detection & Manual Officer Review**: Rule-based cross-referencing identifies duplicate or related complaints filed simultaneously across RB, PGRC, and other bureaus for the same institution. Linked complaints preserve independent dockets with mutual references with zero destructive auto-merging.
+4. **Dynamic Threshold Filtering & History Preservation**: The global similarity threshold dynamically filters open candidate pairs. Historical officer decisions (`linked`, `dismissed`, `deferred`) remain permanently preserved and are never reverted to "pending" when thresholds change.
+5. **Fine-Grained Role-Based Access Control (RBAC)**: Enforces strict data isolation among 4 distinct role tiers:
+   - **System Admin**: System-wide authority, cross-bureau reassignment, policy settings, analytics, status override with audit note.
+   - **Bureau Admin**: Scoped strictly to cases within their authorized Bureau jurisdiction (e.g., PGRC), intra-bureau officer assignment, bureau overlap review.
+   - **Handling Officer**: Scoped strictly to assigned dockets or their Bureau cell; drives investigation lifecycle.
    - **Student / Complainant**: Self-service intake and docket tracking; strictly isolated to own submissions.
-4. **Chronological Audit Trail & Immutable Timelines**: Every case intake, status transition, officer reassignment, and remark generates a timestamped database timeline event with actor verification.
-5. **Cross-Bureau Overlap & Accidental Duplicate Detection**: Real-time similarity matching on campus ID and category/narrative text to prevent duplicate filings and detect concurrent cross-bureau investigations.
-6. **Statutory SLA Surveillance Engine**: Dynamic resolution windows calculated from grievance priority (Critical: 3 days, High: 7 days, Medium: 14 days, Low: 21 days) with warning indicators for overdue cases.
+6. **Chronological Audit Trail & Immutable Timelines**: Every case intake, status transition, officer reassignment, and remark generates a timestamped database timeline event with actor verification derived directly from verified JWT tokens.
+7. **Statutory SLA Surveillance Engine & Persistent Settings**: Dynamic resolution windows calculated from grievance priority (Critical: 3 days, High: 7 days, Medium: 14 days) and stored in PostgreSQL, with warning indicators for overdue cases.
+8. **Institution Directory & Risk Profiles**: Campus registry showing grievance density, active case counts, and risk levels per institution.
 
 ---
 
@@ -56,16 +66,17 @@ graph TD
 | **Icons & Visuals** | Lucide React, Recharts | Data visualizations, trend graphs, and SVG iconography |
 | **Backend Framework** | FastAPI | High-performance Python async REST API, OpenAPI docs |
 | **ORM & Database** | SQLAlchemy 2 + PostgreSQL | Relational schema, ACID transactions, connection pooling |
-| **Database Migrations**| Alembic | Version-controlled schema migrations (revisions 001 - 005) |
+| **Database Migrations**| Alembic (revisions 001–006)| Version-controlled schema migrations |
 | **Machine Learning** | scikit-learn + joblib | TF-IDF Vectorizer + Multinomial Logistic Regression |
-| **Security & Auth** | PyJWT + Passlib (Bcrypt) | Stateless Bearer JWT tokens, role-based route dependencies |
-| **Testing** | pytest, Node.js Test Runner | Unit, workflow, RBAC, evaluation, and client integration tests |
+| **Security & Auth** | PyJWT + Bcrypt | Stateless Bearer JWT tokens, role-based route dependencies |
+| **Testing** | pytest, Node.js Test Runner | 81 backend tests + 67 frontend tests |
 
 ---
 
 ## 3. Machine Learning Pipeline & Advisory Integration
 
 ### Architecture & Non-Overriding Design Principle
+
 The AI classification engine uses a scikit-learn pipeline consisting of a `TfidfVectorizer` (sublinear TF, unigram + bigram, 5,000 max features) and L-BFGS `LogisticRegression` models trained across 9 official AICTE complaint categories:
 
 - Fee Regulation & Unauthorised Charges
@@ -93,23 +104,45 @@ The AI classification engine uses a scikit-learn pipeline consisting of a `Tfidf
 | **Bureau** (Hybrid Rules+ML)| Administrative Domain Heuristics | **83.3%** | **0.7337** | **+38.9% accuracy gain** through domain routing |
 | **Priority** (4 Classes) | TF-IDF + Logistic Regression | **38.9%** | **0.1726** | Biased to majority class; priority requires external calendar context |
 
-*(Evaluated strictly on 180 synthetic complaints generated for prototype evaluation. See [backend/ml/artifacts/evaluation_report.md](file:///c:/Users/Princ/Abhigyan/backend/ml/artifacts/evaluation_report.md) for full confusion matrices and class distributions).*
+*(Evaluated on 180 synthetic complaints generated for prototype evaluation. See [backend/ml/artifacts/evaluation_report.md](file:///d:/Projects/Abhigyan/backend/ml/artifacts/evaluation_report.md) for full confusion matrices and class distributions).*
 
 ---
 
-## 4. Getting Started & Installation
+## 4. Demo Credentials (Development & Demonstration Only)
+
+All seeded demo accounts are configured with the default demonstration password:
+
+```
+AicteDemo@2026
+```
+
+| Role Persona | Display Name | Email / Login ID | Bureau Jurisdiction | Password |
+| :--- | :--- | :--- | :--- | :--- |
+| **Super Admin** | Dr. S. Mehta | `member-sec@aicte-india.org` | All Bureaus (System-wide) | `AicteDemo@2026` |
+| **Bureau Admin** | Dr. Priya Nair | `priya.nair@aicte-india.org` | PGRC Bureau | `AicteDemo@2026` |
+| **Bureau Admin** | Anita Verma | `anita.verma@aicte-india.org` | Regulation Bureau (RB) | `AicteDemo@2026` |
+| **Handling Officer** | Rajesh Kumar | `rajesh.kumar@aicte-india.org` | PGRC Scrutiny Cell | `AicteDemo@2026` |
+| **Handling Officer** | Suresh Patel | `suresh.patel@aicte-india.org` | Approval Bureau Cell | `AicteDemo@2026` |
+| **Student / Citizen** | Rohit Sharma | `rohit.sharma@student.edu.in` | Self-Service Complainant | `AicteDemo@2026` |
+
+> **Quick Access:** In development mode (`DEMO_AUTH_ENABLED=True`), the login screen also provides convenient one-click demo login buttons for each role perspective.
+
+---
+
+## 5. Setup & Execution Guide (Windows PowerShell)
 
 ### Prerequisites
 
 - **Node.js**: v18.x or v20.x LTS
 - **Python**: v3.10, v3.11, or v3.12
-- **PostgreSQL**: v14, v15, or v16 running locally or in Docker
+- **PostgreSQL**: v14, v15, v16, or v18 running locally on port 5432
+- **Git**
 
 ---
 
 ### Step 1: Clone Repository
 
-```bash
+```powershell
 git clone https://github.com/nooralam08/Abhigyan.git
 cd Abhigyan
 ```
@@ -118,43 +151,24 @@ cd Abhigyan
 
 ### Step 2: Backend Setup & Virtual Environment
 
-1. Navigate to the `backend/` directory:
-   ```bash
-   cd backend
-   ```
-
-2. Create and activate a Python virtual environment:
-   ```bash
-   # Windows PowerShell
+1. Navigate to the `backend/` directory or run from the repository root:
+   ```powershell
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
-
-   # Linux / macOS
-   python3 -m venv .venv
-   source .venv/bin/activate
    ```
 
-3. Install backend dependencies:
-   ```bash
+2. Install backend dependencies:
+   ```powershell
    pip install --upgrade pip
-   pip install -r requirements.txt
+   pip install -r backend/requirements.txt
    ```
 
----
-
-### Step 3: Database & Environment Configuration
-
-1. Create a local PostgreSQL database:
-   ```sql
-   CREATE DATABASE abhigyan_db;
+3. Configure environment variables:
+   Copy the example environment file to `backend/.env`:
+   ```powershell
+   Copy-Item backend/.env.example backend/.env
    ```
-
-2. Copy the environment template and configure your local settings:
-   ```bash
-   cp .env.example .env
-   ```
-
-3. Edit `.env` with your PostgreSQL credentials:
+   Open `backend/.env` and replace `YOUR_POSTGRES_PASSWORD` with your actual local PostgreSQL `postgres` user password:
    ```ini
    DATABASE_URL=postgresql+psycopg2://postgres:YOUR_PASSWORD@localhost:5432/abhigyan_db
    CORS_ORIGINS=http://localhost:5173,http://localhost:4173
@@ -166,183 +180,174 @@ cd Abhigyan
    AI_CONFIDENCE_THRESHOLD=0.40
    ```
 
----
+4. Verify database connectivity and auto-create target database:
+   ```powershell
+   python backend/check_db.py
+   ```
 
-### Step 4: Run Database Migrations
+5. Run Alembic migrations:
+   ```powershell
+   cd backend
+   alembic upgrade head
+   cd ..
+   ```
 
-Apply Alembic migrations to set up the schema (users, institutions, complaints, timelines, AI classification columns):
+6. Seed database with demo records (idempotent):
+   ```powershell
+   python backend/app/seed.py
+   ```
 
-```bash
-alembic upgrade head
-```
+7. (Optional) Retrain or evaluate Machine Learning models:
+   ```powershell
+   python backend/ml/train_model.py
+   python backend/ml/evaluate_model.py
+   ```
 
-Verify migration status:
-```bash
-alembic current
-# Output should indicate: 005_ai_classification (head)
-```
+8. Start FastAPI backend server:
+   ```powershell
+   cd backend
+   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
 
----
-
-### Step 5: Train and Evaluate Machine Learning Model
-
-Generate artifacts (`vectorizer.joblib`, `category_model.joblib`, `bureau_model.joblib`, `priority_model.joblib`, `metadata.json`):
-
-```bash
-python ml/train_model.py
-```
-
-Run reproducible stratified evaluation benchmark and generate report:
-```bash
-python ml/evaluate_model.py
-```
-
----
-
-### Step 6: Frontend Setup
-
-Open a new terminal at the project root (`Abhigyan/`):
-
-```bash
-npm install
-```
+   The backend API is accessible at:
+   - Base API: `http://localhost:8000/api`
+   - Interactive Swagger API Docs: `http://localhost:8000/docs`
+   - ReDoc Documentation: `http://localhost:8000/redoc`
+   - Health Check: `http://localhost:8000/api/health`
 
 ---
 
-## 5. Clean-Start Commands & Running Locally
+### Step 3: Frontend Setup & Startup
 
-### Start Backend API Server
+Open a new PowerShell terminal at the project root (`Abhigyan/`):
 
-```bash
-cd backend
-.\.venv\Scripts\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000 --reload
-```
+1. Install frontend dependencies:
+   ```powershell
+   npm install
+   ```
 
-- API Base URL: `http://localhost:8000/api`
-- Interactive OpenAPI / Swagger UI: `http://localhost:8000/docs`
-- Health Check: `http://localhost:8000/api/health`
+2. (Optional) Configure API Base URL:
+   Defaults to `http://localhost:8000/api`. To customize, create a `.env` in the root:
+   ```ini
+   VITE_API_URL=http://localhost:8000/api
+   ```
 
-### Start Frontend Application
+3. Start development server:
+   ```powershell
+   npm run dev
+   ```
+   Access the web application at `http://localhost:5173/`.
 
-In another terminal at the project root:
-
-```bash
-npm run dev
-```
-
-- Web Application: `http://localhost:5173`
-
----
-
-## 6. Seed Accounts & Demo Credentials
-
-When `DEMO_AUTH_ENABLED=True` (default in development), you can log in instantly via the role selector or standard credentials:
-
-| Role Persona | Display Name | Email / Login ID | Bureau Jurisdiction | Password |
-| :--- | :--- | :--- | :--- | :--- |
-| **Super Admin** | Dr. S. Mehta | `member-sec@aicte-india.org` | All Bureaus (System-wide) | `AicteDemo@2026` |
-| **Bureau Admin** | Dr. Priya Nair | `priya.nair@aicte-india.org` | PGRC Bureau | `AicteDemo@2026` |
-| **Bureau Admin** | Anita Verma | `anita.verma@aicte-india.org` | Regulation Bureau (RB) | `AicteDemo@2026` |
-| **Handling Officer** | Rajesh Kumar | `rajesh.kumar@aicte-india.org` | PGRC Scrutiny Cell | `AicteDemo@2026` |
-| **Handling Officer** | Suresh Patel | `suresh.patel@aicte-india.org` | Approval Bureau Cell | `AicteDemo@2026` |
-| **Student / Citizen** | Rohit Sharma | `rohit.sharma@student.edu.in` | Self-Service Complainant | `AicteDemo@2026` |
+4. Production Build & Preview:
+   ```powershell
+   npm run build
+   npm run preview
+   ```
 
 ---
 
-## 7. Automated Verification & Testing Suites
+## 6. Automated Verification & Testing Suites
 
 ### Running Backend Tests (`pytest`)
 
-Run all 76 unit, integration, RBAC, workflow, and evaluation tests:
+Run all 81 unit, integration, RBAC, workflow, and evaluation tests:
 
-```bash
-cd backend
-.\.venv\Scripts\pytest.exe -v
+```powershell
+.\.venv\Scripts\python -m pytest backend/tests -v
 ```
 
-Test coverage includes:
+Test suites cover:
 - `tests/test_complete_audit_workflows.py`: Complete Student, Officer, Bureau Admin, Super Admin workflows and error guards.
-- `tests/test_auth_rbac.py`: JWT login, password verification, expiration, demo-login isolation, and case access authorization.
+- `tests/test_auth_rbac.py`: JWT login, password verification, token expiration, demo-login isolation, and case access authorization.
 - `tests/test_complaint_workflows.py`: Status transitions, permitted lifecycle paths, assignment rollback, and timeline actor auditing.
+- `tests/test_overlaps.py`: Cross-bureau overlap detection, sensitivity threshold filtering, manual confirmation persistence, role gating.
+- `tests/test_settings.py`: Authoritative system settings, Admin update persistence, SLA hierarchy validation, and threshold candidate filtering.
 - `tests/test_ai_complaint_integration.py`: Live classification preview, non-override creation, missing model fallbacks.
 - `tests/test_ai_classifier.py`: Text preprocessing, model loading, thresholding, rule-based bureau resolution.
 - `tests/test_model_evaluation.py`: Reproducible stratified splits, zero data leakage checks, metric math validity.
 - `tests/test_institutions.py` & `tests/test_health.py`: Registry queries, search filters, and database connectivity.
 
-### Running Frontend Tests (`node:test`)
+### Real-Database Live Verifications
 
-Run all 15 frontend client integration tests against the live API:
+Execute end-to-end integration verifications against live PostgreSQL:
 
-```bash
-# Ensure backend is running on http://127.0.0.1:8000
-npm run test
+```powershell
+.\.venv\Scripts\python backend/verify_live_phase2c.py
 ```
 
-### Building for Production
+### Running Frontend Tests (`node:test`)
 
-Verify TypeScript compilation and Vite bundling:
+Run all 67 frontend automated integration tests against the live API:
 
-```bash
-npm run build
+```powershell
+npm test
+```
+
+### TypeScript Compilation Check
+
+```powershell
+npx tsc --noEmit
 ```
 
 ---
 
-## 8. Repository File Structure
+## 7. Repository File Structure
 
 ```
 Abhigyan/
 ├── backend/
-│   ├── alembic/                    # Database migration scripts
-│   │   ├── versions/               # Revisions 001 through 005 (AI columns)
-│   │   └── env.py                  # Alembic migration environment
+│   ├── alembic/                    # Alembic database migration scripts
+│   │   ├── versions/               # Revisions 001 through 006
+│   │   └── env.py                  # Alembic migration runner configuration
 │   ├── app/
-│   │   ├── models/                 # SQLAlchemy DB models (complaint, user, institution, timeline)
-│   │   ├── routers/                # FastAPI endpoints (auth, complaints, institutions, health)
-│   │   ├── schemas/                # Pydantic validation schemas and response contracts
+│   │   ├── models/                 # SQLAlchemy ORM models (User, Institution, Complaint, Timeline, Overlap, Setting)
+│   │   ├── routers/                # FastAPI endpoints (health, auth, institutions, complaints, overlaps, settings)
+│   │   ├── schemas/                # Pydantic validation schemas & response contracts
 │   │   ├── services/
-│   │   │   └── ai_classifier.py    # Lazy-loading AI classifier and bureau routing engine
+│   │   │   └── ai_classifier.py    # Lazy-loading AI classifier & statutory routing engine
 │   │   ├── auth.py                 # JWT validation, password hashing, RBAC check_case_access
-│   │   ├── config.py               # Settings and environment configuration
-│   │   ├── database.py             # SQLAlchemy sessionmaker and engine
-│   │   └── main.py                 # FastAPI application factory and CORS middleware
+│   │   ├── config.py               # Application settings via pydantic-settings
+│   │   ├── database.py             # SQLAlchemy sessionmaker & engine
+│   │   ├── main.py                 # FastAPI application factory & router inclusion
+│   │   └── seed.py                 # Idempotent demo database seeding
 │   ├── ml/
 │   │   ├── artifacts/              # Local model weights (.joblib, metadata.json, evaluation_report.md)
 │   │   ├── evaluate_model.py       # Standalone stratified evaluation benchmark
 │   │   ├── generate_dataset.py     # Synthetic dataset generator
 │   │   ├── train_model.py          # TF-IDF + LogisticRegression training pipeline
 │   │   └── training_data.csv       # Labeled synthetic complaint examples (180 rows)
-│   ├── tests/                      # Automated pytest test suites (76 tests)
-│   ├── .env.example                # Documented configuration template
-│   └── requirements.txt            # Python dependencies
+│   ├── tests/                      # Automated pytest test suites (81 tests)
+│   ├── alembic.ini                 # Alembic configuration
+│   ├── check_db.py                 # Database connectivity & creation verification
+│   ├── requirements.txt            # Python dependencies
+│   └── verify_live_phase2c.py      # End-to-end live database verification script
 ├── src/
-│   ├── api/
-│   │   ├── __tests__/              # Node.js automated integration test suites (15 tests)
-│   │   ├── client.ts               # Axios / fetch HTTP client with automatic Bearer token injection
-│   │   └── complaints.ts           # Complaint API client (classify preview, submit, list, get)
-│   ├── components/                 # Reusable UI components (ComplaintTable, AppLayout, Sidebar, TopBar)
-│   ├── pages/                      # Application pages (Complaints, Dashboard, Institutions, Reports, Overlaps)
-│   ├── types.ts                    # Shared TypeScript interfaces (Complaint, AIClassificationResult, User)
-│   ├── App.tsx                     # Main application view coordinator and auth state
-│   └── main.tsx                    # Vite entry point
-├── .gitignore                      # Git exclusion rules (excluding .env, secrets, binary artifacts)
-├── package.json                    # Frontend dependencies and test scripts
+│   ├── api/                        # Frontend API clients (auth, complaints, overlaps, settings, client)
+│   │   └── __tests__/              # Automated test suites (67 tests)
+│   ├── components/                 # UI components and layouts
+│   │   ├── layout/                 # AppLayout, Sidebar, TopBar
+│   │   ├── ComplaintTable.tsx      # Sortable complaint directory
+│   │   └── ui.tsx                  # Shared design system components
+│   ├── pages/                      # Page views (Dashboard, Complaints, Overlaps, Settings, etc.)
+│   ├── types.ts                    # TypeScript domain interfaces
+│   ├── data.ts                     # Workflow rules, transition logic, and mock fallbacks
+│   ├── App.tsx                     # Top-level state management & view routing
+│   └── main.tsx                    # React DOM entry point
+├── .env.example                    # Root environment template
+├── .gitignore                      # Git exclusion rules (ignores .env, caches, venv, dist)
+├── package.json                    # Node dependencies and scripts
 ├── tailwind.config.js              # Institutional navy styling theme
-├── tsconfig.json                   # TypeScript configuration
+├── tsconfig.json                   # TypeScript compiler options
 └── vite.config.ts                  # Vite build configuration
 ```
 
 ---
 
-## 9. Production Hardening & Deployment Notes
+## 8. Known Demonstration Boundaries & Limitations
 
-Before deploying Abhigyan to a production environment:
+To maintain strict submission integrity, the following boundaries are disclosed:
 
-1. **Disable Demo Authentication**: Set `DEMO_AUTH_ENABLED=False` in environment variables.
-2. **Generate Strong JWT Secret**: Set `JWT_SECRET_KEY` to a cryptographically random string (`openssl rand -hex 32`).
-3. **Restrict CORS**: Configure `CORS_ORIGINS` to specify only the official production domain(s).
-4. **Use Production ASGI Server**: Run FastAPI behind Gunicorn with Uvicorn workers:
-   ```bash
-   gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-   ```
-5. **Real-World Model Retraining**: The current prototype model is trained on 180 synthetic complaint examples for architectural demonstration. Real-world operational deployment requires training on anonymized institutional complaint dossiers, continuous drift monitoring, and periodic recalibration.
+1. **Email Alerts & Auto-Escalation:** The email alert and automated SLA escalation controls in Settings are demonstrable configuration toggles stored in the database. Background celery/cron workers and live SMTP relay servers are not attached in this prototype.
+2. **AI Overlap Match Scoring:** Overlap similarity scores (0–100%) are computed via deterministic string matching, institutional ID intersection, and category analysis rather than live vector database embeddings.
+3. **Document Attachments:** Uploaded supporting grievance documents in Case Details are retained within client state/storage and are not uploaded to an external object store (e.g. AWS S3).
+4. **Synthetic Model Training Data:** The ML classifier prototype is trained on 180 synthetic complaint examples for architectural demonstration. Real-world operational deployment requires training on anonymized institutional complaint dossiers, continuous drift monitoring, and periodic recalibration.

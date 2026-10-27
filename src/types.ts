@@ -143,11 +143,23 @@ export interface Overlap {
   b: string
   similarity: number
   reasons: string[]
-  status?: 'pending' | 'linked' | 'dismissed' | 'deferred'
+  status?: 'pending' | 'linked' | 'dismissed' | 'deferred' | 'open'
   notes?: string
   reviewedBy?: string
   reviewedDate?: string
   decisionNote?: string
+  justification?: string
+}
+
+export interface LinkedDocket {
+  overlapId: string
+  caseId: string
+  bureau: Bureau
+  title: string
+  similarity: number
+  justification?: string
+  confirmedBy?: string
+  confirmedAt?: string
 }
 
 export interface AppNotification {
@@ -159,6 +171,9 @@ export interface AppNotification {
   caseId?: string
   read: boolean
   targetRole?: Role | 'All'
+  recipientUserId?: string
+  recipientEmail?: string
+  bureau?: Bureau | 'All'
 }
 
 export interface UserProfile {

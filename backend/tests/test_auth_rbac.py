@@ -289,6 +289,11 @@ class MockAuthDBSession:
                         val = getattr(getattr(criterion, "right", None), "value", None)
                         if val is not None:
                             filtered = [u for u in filtered if u.role.lower() == str(val).lower()]
+                    # User filter by name
+                    elif "lower(users.name)" in criterion_str or "users.name" in criterion_str:
+                        val = getattr(getattr(criterion, "right", None), "value", None)
+                        if val is not None:
+                            filtered = [u for u in filtered if u.name.lower() == str(val).lower()]
                     # Complaint filter by id
                     elif "complaints.id" in criterion_str:
                         val = getattr(getattr(criterion, "right", None), "value", None)
@@ -304,6 +309,22 @@ class MockAuthDBSession:
                         val = getattr(getattr(criterion, "right", None), "value", None)
                         if val is not None:
                             filtered = [c for c in filtered if c.complainant_email and c.complainant_email.lower() == str(val).lower()]
+                    # Officer filter (OR of officer name and assigned_user_id)
+                    elif "complaints.officer" in criterion_str or "complaints.assigned_user_id" in criterion_str:
+                        clauses = getattr(criterion, "clauses", [criterion])
+                        targets = []
+                        for cl in clauses:
+                            v = getattr(getattr(cl, "right", None), "value", None)
+                            if v:
+                                targets.append(str(v).strip().lower())
+                        if targets:
+                            filtered = [
+                                c for c in filtered
+                                if hasattr(c, "officer") and (
+                                    (c.officer and c.officer.lower() in targets) or
+                                    (c.assigned_user_id and c.assigned_user_id.lower() in targets)
+                                )
+                            ]
                     # Complaint filter for Complainant (OR of email and name)
                     elif "or_" in criterion_str or ("complainant_email" in criterion_str and "complainant_name" in criterion_str):
                         # Filter to complainant Rohit
@@ -773,4 +794,131 @@ def test_demo_login_rejected_when_disabled_or_production(client: TestClient, aut
         settings.DEMO_AUTH_ENABLED = orig_demo
         settings.ENVIRONMENT = orig_env
 
+
+def test_handling_officer_reassignment_persists_and_synchronizes_access(client: TestClient, auth_mock_db):
+    """
+    Regression Test (Bug 3):
+    1. System Admin reassigns case from Officer A (Rajesh Kumar, u2) to Officer B (Anita Verma, u3).
+    2. Backend persists assigned_user_id and officer in database and records timeline event.
+    3. Officer B (new assignee) can retrieve the case and view it in their worklist.
+    4. Officer A (previous assignee) can NO LONGER access or mutate the case (403 Forbidden).
+    5. System Admin retrieves the case and confirms updated handling officer.
+    """
+    app.dependency_overrides[get_current_user] = lambda: USER_ADMIN
+    case_id = SAMPLE_COMPLAINT_PGRC.id
+
+    # 1. System Admin reassigns case from Rajesh Kumar to Anita Verma
+    assign_payload = {
+        "userId": USER_OFFICER_RB.id,
+        "officer": USER_OFFICER_RB.name,
+        "reason": "Administrative workload rebalance between PGRC officers."
+    }
+    assign_res = client.patch(f"/api/complaints/{case_id}/assign", json=assign_payload)
+    assert assign_res.status_code == 200
+    res_data = assign_res.json()
+    assert res_data["officer"] == USER_OFFICER_RB.name
+    assert res_data["assignedUserId"] == USER_OFFICER_RB.id
+
+    # Verify persistence in mock database session
+    db_case = [c for c in auth_mock_db.complaints if c.id == case_id][0]
+    assert db_case.officer == USER_OFFICER_RB.name
+    assert db_case.assigned_user_id == USER_OFFICER_RB.id
+
+    # 2. Officer B (Anita Verma) logs in and accesses the case
+    app.dependency_overrides[get_current_user] = lambda: USER_OFFICER_RB
+    officer_b_get = client.get(f"/api/complaints/{case_id}")
+    assert officer_b_get.status_code == 200
+    assert officer_b_get.json()["officer"] == USER_OFFICER_RB.name
+
+    # Officer B worklist includes this case
+    officer_b_list = client.get("/api/complaints")
+    assert officer_b_list.status_code == 200
+    b_case_ids = [item["id"] for item in officer_b_list.json()["items"]]
+    assert case_id in b_case_ids
+
+    # Officer B can add timeline remarks
+    officer_b_note = client.post(
+        f"/api/complaints/{case_id}/timeline",
+        json={"note": "Anita Verma: Case dossier reviewed and preliminary scrutiny initiated."}
+    )
+    assert officer_b_note.status_code == 201
+    assert "Anita Verma" in officer_b_note.json()["by"]
+
+    # 3. Officer A (Rajesh Kumar) logs in and attempts to access the case
+    app.dependency_overrides[get_current_user] = lambda: USER_OFFICER_PGRC
+    officer_a_get = client.get(f"/api/complaints/{case_id}")
+    assert officer_a_get.status_code == 403
+    assert "neither assigned" in officer_a_get.json()["detail"].lower()
+
+    # Officer A worklist excludes this case
+    officer_a_list = client.get("/api/complaints")
+    assert officer_a_list.status_code == 200
+    a_case_ids = [item["id"] for item in officer_a_list.json()["items"]]
+    assert case_id not in a_case_ids
+
+    # Officer A cannot add timeline remarks
+    officer_a_note = client.post(
+        f"/api/complaints/{case_id}/timeline",
+        json={"note": "Rajesh Kumar: Attempting unauthorized remark on reassigned case."}
+    )
+    assert officer_a_note.status_code == 403
+
+    # 4. System Admin sees updated Handling Officer
+    app.dependency_overrides[get_current_user] = lambda: USER_ADMIN
+    admin_get = client.get(f"/api/complaints/{case_id}")
+    assert admin_get.status_code == 200
+    assert admin_get.json()["officer"] == USER_OFFICER_RB.name
+    assert admin_get.json()["assignedUserId"] == USER_OFFICER_RB.id
+
+
+def test_officer_and_bureau_admin_assignment_authorization_rules(client: TestClient, auth_mock_db):
+    """
+    Regression Test:
+    - Officer cannot assign or reassign cases (403 Forbidden).
+    - Complainant cannot assign cases (403 Forbidden).
+    - Bureau Admin cannot assign cases outside authorized Bureau (403 Forbidden).
+    - Bureau Admin cannot assign case to officer in another Bureau (403 Forbidden).
+    - Bureau Admin can reassign cases within authorized Bureau to active Bureau officer.
+    """
+    # 1. Officer attempt
+    app.dependency_overrides[get_current_user] = lambda: USER_OFFICER_PGRC
+    res_officer = client.patch(
+        f"/api/complaints/{SAMPLE_COMPLAINT_PGRC.id}/assign",
+        json={"userId": "u3", "reason": "Officer self-reassignment attempt"}
+    )
+    assert res_officer.status_code == 403
+    assert "cannot directly reassign cases" in res_officer.json()["detail"].lower()
+
+    # 2. Complainant attempt
+    app.dependency_overrides[get_current_user] = lambda: USER_COMPLAINANT
+    res_complainant = client.patch(
+        f"/api/complaints/{SAMPLE_COMPLAINT_PGRC.id}/assign",
+        json={"userId": "u2", "reason": "Complainant assignment attempt"}
+    )
+    assert res_complainant.status_code == 403
+
+    # 3. Bureau Admin attempts to reassign case originating in another bureau (RB)
+    app.dependency_overrides[get_current_user] = lambda: USER_BUREAU_ADMIN
+    res_cross_bureau_case = client.patch(
+        f"/api/complaints/{SAMPLE_COMPLAINT_RB.id}/assign",
+        json={"userId": "u2", "reason": "PGRC Admin managing RB case"}
+    )
+    assert res_cross_bureau_case.status_code == 403
+    assert "authorized only for pgrc" in res_cross_bureau_case.json()["detail"].lower()
+
+    # 4. Bureau Admin attempts to assign PGRC case to an officer in RB bureau (Anita Verma, u3)
+    res_cross_officer = client.patch(
+        f"/api/complaints/{SAMPLE_COMPLAINT_PGRC.id}/assign",
+        json={"userId": USER_OFFICER_RB.id, "reason": "Assigning to RB officer"}
+    )
+    assert res_cross_officer.status_code == 403
+    assert "cannot assign case to officer in rb bureau" in res_cross_officer.json()["detail"].lower()
+
+    # 5. Bureau Admin assigns PGRC case to an officer in PGRC bureau
+    res_valid = client.patch(
+        f"/api/complaints/{SAMPLE_COMPLAINT_PGRC.id}/assign",
+        json={"userId": USER_OFFICER_PGRC.id, "reason": "Valid PGRC reassignment"}
+    )
+    assert res_valid.status_code == 200
+    assert res_valid.json()["officer"] == USER_OFFICER_PGRC.name
 

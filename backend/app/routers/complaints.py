@@ -34,14 +34,30 @@ router = APIRouter(prefix="/complaints", tags=["Complaints"])
 
 # Permitted status transitions per workflow rules (AICTE Complaint Lifecycle)
 PERMITTED_STATUS_TRANSITIONS = {
-    "Pending": ["In Progress"],
+    "Pending": ["In Progress", "Escalated"],
     "In Progress": ["Escalated", "Resolved"],
     "Escalated": ["In Progress", "Resolved"],
     "Resolved": [],
 }
 
-def get_sla_days(priority: str) -> int:
+def get_sla_days(priority: str, db: Optional[Session] = None) -> int:
     p = priority.lower()
+    if db is not None:
+        try:
+            from app.models.setting import SystemSetting
+            setting = db.query(SystemSetting).filter(SystemSetting.key == "global").first()
+            if setting:
+                if p == "critical":
+                    return max(1, setting.sla_critical)
+                elif p == "high":
+                    return max(1, setting.sla_high)
+                elif p == "medium":
+                    return max(1, setting.sla_medium)
+                elif p == "low":
+                    return max(setting.sla_medium + 7, 21)
+        except Exception:
+            pass
+
     if p == "critical":
         return 3
     elif p == "high":
@@ -156,6 +172,12 @@ def create_complaint(
             case_id = f"{prefix}-2026-{int(datetime.now(timezone.utc).timestamp()) % 10000:04d}"
     else:
         case_id = case_id.strip()
+        expected_prefix = "AB" if complaint_in.bureau == "Approval" else ("ACD" if complaint_in.bureau == "Academic" else complaint_in.bureau)
+        if not case_id.startswith(f"{expected_prefix}-"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Case ID '{case_id}' does not match Bureau prefix '{expected_prefix}'."
+            )
         existing = db.query(Complaint).filter(Complaint.id.ilike(case_id)).first()
         if existing:
             raise HTTPException(
@@ -202,7 +224,7 @@ def create_complaint(
     # 5. Server-generated Filing Date & Due Date SLA - NEVER trust client
     server_now = datetime.now(timezone.utc)
     date_val = server_now.strftime("%Y-%m-%d")
-    sla_days = get_sla_days(complaint_in.priority)
+    sla_days = get_sla_days(complaint_in.priority, db=db)
     due_val = (server_now + timedelta(days=sla_days)).strftime("%Y-%m-%d")
 
     # 6. Permanent ID
@@ -609,11 +631,18 @@ def update_complaint_status(
     check_case_access(current_user, complaint, action="update_status")
 
     target_status = payload.status
-    if complaint.status == "Resolved":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Case is Resolved and closed. Status transitions from 'Resolved' are not permitted."
-        )
+
+    # --- Admin override path ---
+    # System Admin may bypass the normal workflow table ONLY when:
+    #   (a) an explicit, non-blank overrideReason is provided, AND
+    #   (b) the current status is not already Resolved (re-open from Resolved requires override).
+    # If the transition is in the normal permitted table, the override path is NOT needed.
+    override_reason = (payload.overrideReason or "").strip()
+    is_admin_override = (
+        current_user.role == "Admin"
+        and bool(override_reason)
+        and target_status not in PERMITTED_STATUS_TRANSITIONS.get(complaint.status, [])
+    )
 
     if complaint.status == target_status:
         raise HTTPException(
@@ -621,11 +650,24 @@ def update_complaint_status(
             detail=f"Complaint is already in '{target_status}' status."
         )
 
-    permitted = PERMITTED_STATUS_TRANSITIONS.get(complaint.status, [])
-    if target_status not in permitted:
+    if complaint.status == "Resolved" and not is_admin_override:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Status transition from '{complaint.status}' to '{target_status}' is not permitted. Permitted transitions: {', '.join(permitted) if permitted else 'None (Case Closed)'}."
+            detail=(
+                "Case is Resolved and closed. Status transitions from 'Resolved' are not permitted "
+                "under normal workflow rules. System Admin may override by supplying a non-empty overrideReason."
+            )
+        )
+
+    permitted = PERMITTED_STATUS_TRANSITIONS.get(complaint.status, [])
+    if target_status not in permitted and not is_admin_override:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Status transition from '{complaint.status}' to '{target_status}' is not permitted. "
+                f"Permitted transitions: {', '.join(permitted) if permitted else 'None (Case Closed)'}. "
+                "System Admin may override by supplying a non-empty overrideReason."
+            )
         )
 
     # Actor identity strictly derived from the authenticated user
@@ -649,14 +691,21 @@ def update_complaint_status(
         else:
             complaint.next_action = get_default_next_action(target_status, complaint.bureau)
 
-        action_label = (
-            "Case investigation concluded & Marked Resolved"
-            if target_status == "Resolved"
-            else f"Status transitioned to {target_status}"
-        )
-        note_text = payload.note.strip() if payload.note and payload.note.strip() else (
-            payload.remarks.strip() if payload.remarks and payload.remarks.strip() else None
-        )
+        if is_admin_override:
+            action_label = f"[Admin Override] Status set to {target_status} from {complaint.status}"
+        elif target_status == "Resolved":
+            action_label = "Case investigation concluded & Marked Resolved"
+        else:
+            action_label = f"Status transitioned to {target_status}"
+
+        note_parts = []
+        if payload.note and payload.note.strip():
+            note_parts.append(payload.note.strip())
+        elif payload.remarks and payload.remarks.strip():
+            note_parts.append(payload.remarks.strip())
+        if is_admin_override:
+            note_parts.append(f"Admin Override Reason: {override_reason}")
+        note_text = " | ".join(note_parts) if note_parts else None
 
         timeline_event = ComplaintTimeline(
             complaint_id=complaint.id,
@@ -744,7 +793,10 @@ def assign_complaint(
                 )
         target_officer = resolved_user.name
         target_user_id = resolved_user.id
-        if not payload.bureau and resolved_user.bureau != "All":
+        # Preserve the complaint's existing bureau unless:
+        #   - caller explicitly passed a bureau AND did NOT set preserveBureau=True, OR
+        #   - preserveBureau is not set (falsy) — legacy: officer's home bureau wins
+        if not payload.bureau and not payload.preserveBureau and resolved_user.bureau != "All":
             target_bureau = resolved_user.bureau
 
     # 2. Or resolve by officer name if provided
@@ -768,7 +820,7 @@ def assign_complaint(
                 )
         target_officer = resolved_user.name
         target_user_id = resolved_user.id
-        if not payload.bureau and resolved_user.bureau != "All":
+        if not payload.bureau and not payload.preserveBureau and resolved_user.bureau != "All":
             target_bureau = resolved_user.bureau
 
     prev_officer = complaint.officer

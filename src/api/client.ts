@@ -7,7 +7,9 @@ export const AUTH_TOKEN_KEY = 'abhigyan_token'
 export const AUTH_USER_KEY = 'abhigyan_current_user'
 export const UNAUTHORIZED_EVENT = 'abhigyan:unauthorized'
 
-const rawApiUrl = import.meta.env.VITE_API_URL as string | undefined
+const rawApiUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
+  ? (import.meta.env.VITE_API_URL as string)
+  : undefined
 export const API_BASE_URL = rawApiUrl
   ? rawApiUrl.replace(/\/$/, '')
   : 'http://localhost:8000/api'

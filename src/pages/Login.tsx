@@ -58,12 +58,22 @@ const DEMO_ROLES: DemoRoleConfig[] = [
   {
     role: 'Officer',
     label: 'Case Officer',
-    title: 'Handling Officer',
+    title: 'Handling Officer (PGRC)',
     user: 'Rajesh Kumar',
     email: 'rajesh.kumar@aicte-india.org',
     scope: 'Investigate assigned cases, record inquiry notes, update status, review overlaps',
     icon: UserCheck,
     accent: 'border-teal-500 bg-teal-50/50 text-teal-900',
+  },
+  {
+    role: 'Officer',
+    label: 'RB Officer',
+    title: 'Handling Officer (RB)',
+    user: 'Anita Verma',
+    email: 'anita.verma@aicte-india.org',
+    scope: 'Regulation Bureau investigations, institutional compliance, fee and admission norms',
+    icon: UserCheck,
+    accent: 'border-indigo-500 bg-indigo-50/50 text-indigo-900',
   },
   {
     role: 'Admin',

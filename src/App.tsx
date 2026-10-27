@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Landmark, Loader2, ShieldAlert } from 'lucide-react'
-import type { AppNotification, Bureau, CaseDocument, Complaint, Page, ReassignmentRequest, Role, Status, UserProfile } from './types'
+import type { AppNotification, AppSettings, Bureau, CaseDocument, Complaint, Overlap, Page, Priority, ReassignmentRequest, Role, Status, UserProfile } from './types'
 import {
   canAddCaseRemarks,
   canAssignCase,
@@ -8,6 +8,12 @@ import {
   canTransferBureau,
   canUpdateCaseStatus,
   canUploadCaseDocument,
+  PERMITTED_STATUS_TRANSITIONS,
+  canViewComplaint,
+  isNotificationAuthorized,
+  resolveOfficerName,
+  getNotificationStorageKey,
+  loadUserNotifications,
   getOfficersForBureau,
   CURRENT_OFFICER,
   TODAY,
@@ -15,8 +21,12 @@ import {
   initialNotifications,
   overlaps,
   userProfiles,
+  getAppSettings,
+  DEFAULT_SETTINGS,
+  SETTINGS_STORAGE_KEY,
 } from './data'
 import {
+  ApiError,
   AUTH_TOKEN_KEY,
   AUTH_USER_KEY,
   clearAuthToken,
@@ -27,18 +37,29 @@ import {
   getCurrentUserApi,
   demoLoginApi,
   logoutAuth,
+  type DemoLoginPayload,
 } from './api/auth'
 import {
+  fetchComplaintsApi,
   updateComplaintStatusApi,
   assignComplaintApi,
   addComplaintTimelineNoteApi,
   createComplaintApi,
 } from './api/complaints'
+import {
+  getOverlapsApi,
+  updateOverlapDecisionApi,
+} from './api/overlaps'
+import {
+  getSettingsApi,
+  updateSettingsApi,
+  resetSettingsApi,
+} from './api/settings'
 import AppLayout from './components/layout/AppLayout'
 import Dashboard from './pages/Dashboard'
 import { ComplaintsPage, DetailsPage, SubmitComplaint } from './pages/Complaints'
 import Institutions from './pages/Institutions'
-import Overlaps, { DEFAULT_OVERLAP_STATES, OVERLAP_STORAGE_KEYS, type OverlapReviewState } from './pages/Overlaps'
+import Overlaps, { DEFAULT_OVERLAP_STATES, OVERLAP_STORAGE_KEYS, isOverlapActivePending, type OverlapReviewState } from './pages/Overlaps'
 import CaseTracking from './pages/CaseTracking'
 import Reports from './pages/Reports'
 import NotificationsPage from './pages/Notifications'
@@ -80,26 +101,6 @@ export const getDefaultLandingPage = (role: Role): Page => {
   return role === 'Complainant' || role === 'Officer' ? 'complaints' : 'dashboard'
 }
 
-export const getNotificationStorageKey = (userId?: string): string => {
-  return userId ? `abhigyan_notifications_${userId}` : 'abhigyan_notifications_anonymous'
-}
-
-export const loadUserNotifications = (userId?: string): AppNotification[] => {
-  if (!userId) return initialNotifications
-  try {
-    const key = getNotificationStorageKey(userId)
-    const stored = localStorage.getItem(key)
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed
-      }
-    }
-  } catch {
-    // Malformed JSON fallback
-  }
-  return initialNotifications
-}
 
 const STORAGE_KEYS = {
   IS_LOGGED_IN: 'abhigyan_is_logged_in',
@@ -236,13 +237,120 @@ export default function App() {
       const stored = localStorage.getItem(STORAGE_KEYS.COMPLAINTS)
       if (stored) {
         const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((c: Complaint) => ({
+            ...c,
+            officer: resolveOfficerName(c, userProfiles),
+          }))
+        }
       }
     } catch {
       // fallback
     }
-    return initialComplaints
+    return initialComplaints.map((c) => ({
+      ...c,
+      officer: resolveOfficerName(c, userProfiles),
+    }))
   })
+
+  const syncComplaints = async () => {
+    const token = getAuthToken()
+    if (!token) return
+    try {
+      const res = await fetchComplaintsApi({ pageSize: 100 })
+      if (res && Array.isArray(res.items)) {
+        setComplaints((prev) => {
+          const serverItems = res.items
+          const prevMap = new Map(prev.map((c) => [c.id, c]))
+
+          const updated = serverItems.map((remote) => {
+            const authoritativeOfficer = resolveOfficerName(remote, users)
+            const local = prevMap.get(remote.id)
+            return {
+              ...(local || {}),
+              ...remote,
+              bureau: remote.bureau as Bureau,
+              priority: remote.priority as Priority,
+              status: remote.status as Status,
+              officer: authoritativeOfficer,
+              assignedUserId: remote.assignedUserId || local?.assignedUserId,
+              timeline: remote.timeline?.length ? remote.timeline : (local?.timeline || []),
+              assignments: local?.assignments?.length
+                ? local.assignments
+                : [
+                    {
+                      officer: authoritativeOfficer,
+                      date: remote.date,
+                      by: 'Central Allocation Engine',
+                      byRole: 'Admin' as Role,
+                      bureau: remote.bureau as Bureau,
+                      type: 'initial' as const,
+                    },
+                  ],
+              documents: local?.documents || [],
+            }
+          })
+          return updated
+        })
+      }
+    } catch {
+      // Offline fallback: preserve local state
+    }
+  }
+
+  const [overlapsList, setOverlapsList] = useState<Overlap[] | undefined>(undefined)
+
+  const syncOverlaps = async () => {
+    try {
+      if (getAuthToken()) {
+        const fetched = await getOverlapsApi()
+        setOverlapsList(fetched)
+        // Also synchronize overlapStates from authoritative backend states
+        const newStates: Record<string, OverlapReviewState> = {}
+        for (const o of fetched) {
+          if (o.status && o.status !== 'open') {
+            newStates[o.id] = o.status as OverlapReviewState
+          }
+        }
+        setOverlapStates(newStates)
+        try {
+          localStorage.setItem(OVERLAP_STORAGE_KEYS.STATES, JSON.stringify(newStates))
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // Offline fallback: preserve local state
+    }
+  }
+
+  const [appSettings, setAppSettings] = useState<AppSettings>(() => getAppSettings())
+
+  const syncSettings = async () => {
+    if (!getAuthToken()) return
+    try {
+      const remote = await getSettingsApi()
+      if (remote) {
+        setAppSettings(remote)
+        try {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(remote))
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // Offline fallback: preserve local state
+    }
+  }
+
+  // Fetch fresh authorized complaints, overlaps & settings from backend when session user changes
+  useEffect(() => {
+    if (isLoggedIn && getAuthToken()) {
+      syncComplaints()
+      syncOverlaps()
+      syncSettings()
+    }
+  }, [isLoggedIn, currentUser?.id])
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     return loadUserNotifications(currentUser?.id)
@@ -254,6 +362,11 @@ export default function App() {
       setNotifications(loadUserNotifications(currentUser.id))
     }
   }, [currentUser?.id])
+
+  // Filter notifications prior to rendering to enforce strict role-based access bounds
+  const visibleNotifications = useMemo(() => {
+    return notifications.filter((n) => isNotificationAuthorized(currentUser, n, complaints))
+  }, [notifications, currentUser, complaints])
 
   const [overlapStates, setOverlapStates] = useState<Record<string, OverlapReviewState>>(() => {
     try {
@@ -270,11 +383,27 @@ export default function App() {
 
   const [users, setUsers] = useState<UserProfile[]>(() => getStoredUsers())
 
-  const handleUpdateOverlapState = (
+  const handleUpdateOverlapState = async (
     id: string,
     state: OverlapReviewState | null,
     note?: string
-  ) => {
+  ): Promise<boolean> => {
+    if (getAuthToken()) {
+      try {
+        const backendState = state || 'open'
+        await updateOverlapDecisionApi(id, {
+          state: backendState,
+          justification: note || 'Decision recorded',
+        })
+        await Promise.all([syncOverlaps(), syncComplaints()])
+        return true
+      } catch (err) {
+        console.error('Failed to update overlap decision on server:', err)
+        return false
+      }
+    }
+
+    // Local fallback when no server token
     setOverlapStates((prev) => {
       const updated = { ...prev }
       if (state === null) {
@@ -284,6 +413,7 @@ export default function App() {
       }
       return updated
     })
+    return true
   }
 
   // Synchronize state changes to localStorage
@@ -367,15 +497,17 @@ export default function App() {
   }, [currentUser])
 
   // Role switching authenticated via backend demo-login
-  const handleSelectRole = async (newRole: Role) => {
+  const handleSelectRole = async (newRole: Role, userId?: string) => {
     try {
-      const res = await demoLoginApi({ role: newRole })
+      const payload: DemoLoginPayload = userId ? { role: newRole, userId } : { role: newRole }
+      const res = await demoLoginApi(payload)
       setCurrentUser(res.user)
       const targetRole = res.user.role as Role
       const permitted = ROLE_PERMITTED_PAGES[targetRole]
       if (permitted && !permitted.includes(activePage)) {
         setActivePage(getDefaultLandingPage(targetRole))
       }
+      await Promise.all([syncComplaints(), syncOverlaps(), syncSettings()])
     } catch {
       const deniedNotif: AppNotification = {
         id: `notif-auth-denied-${Date.now()}`,
@@ -396,6 +528,64 @@ export default function App() {
       ? user.role
       : 'Admin') as Role
     setActivePage(getDefaultLandingPage(role))
+    syncComplaints()
+    syncOverlaps()
+    syncSettings()
+  }
+
+  const handleUpdateSettings = async (
+    newSettings: Partial<AppSettings>
+  ): Promise<boolean | AppSettings> => {
+    if (getAuthToken()) {
+      try {
+        const updated = await updateSettingsApi(newSettings)
+        setAppSettings(updated)
+        try {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updated))
+        } catch {
+          // ignore
+        }
+        await syncOverlaps()
+        return updated
+      } catch (err) {
+        console.error('Failed to update system settings on server:', err)
+        throw err
+      }
+    }
+    const merged: AppSettings = { ...appSettings, ...newSettings }
+    setAppSettings(merged)
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged))
+    } catch {
+      // ignore
+    }
+    return merged
+  }
+
+  const handleResetSettings = async (): Promise<boolean | AppSettings> => {
+    if (getAuthToken()) {
+      try {
+        const reset = await resetSettingsApi()
+        setAppSettings(reset)
+        try {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(reset))
+        } catch {
+          // ignore
+        }
+        await syncOverlaps()
+        return reset
+      } catch (err) {
+        console.error('Failed to reset system settings on server:', err)
+        throw err
+      }
+    }
+    setAppSettings(DEFAULT_SETTINGS)
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(DEFAULT_SETTINGS))
+    } catch {
+      // ignore
+    }
+    return DEFAULT_SETTINGS
   }
 
   const handleSignOut = () => {
@@ -410,88 +600,138 @@ export default function App() {
 
   // Handlers
   const handleOpenCase = (id: string) => {
+    const target = complaints.find((c) => c.id.toUpperCase() === id.toUpperCase())
+    if (target) {
+      const access = canViewComplaint(currentUser, target)
+      if (!access.allowed) {
+        const deniedNotif: AppNotification = {
+          id: `notif-denied-${Date.now()}`,
+          type: 'alert',
+          title: 'Access Restricted',
+          message: access.reason || `You are not authorized to access docket ${id}.`,
+          timestamp: `${TODAY} 11:30`,
+          caseId: id,
+          read: false,
+        }
+        setNotifications((prev) => [deniedNotif, ...prev])
+        return
+      }
+    }
     setSelectedCaseId(id)
     setActivePage('details')
   }
 
-  const handleStatusChange = async (id: string, newStatus: Status, noteText?: string) => {
+  const handleStatusChange = async (
+    id: string,
+    newStatus: Status,
+    noteText?: string,
+    overrideReason?: string
+  ): Promise<{ success: boolean; error?: string }> => {
     const target = complaints.find((c) => c.id === id)
-    if (!target) return
+    if (!target) return { success: false, error: 'Complaint not found.' }
 
-    const check = canUpdateCaseStatus(currentUser, target, newStatus)
+    const check = canUpdateCaseStatus(currentUser, target, newStatus, overrideReason)
     if (!check.allowed) {
       const blockedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Status Update Denied (FastAPI 403 Simulation)',
+        title: 'Status Update Denied (HTTP 403)',
         message: check.reason || 'You do not have permission to execute this status transition.',
         timestamp: `${TODAY} 11:30`,
         caseId: id,
         read: false,
       }
       setNotifications((prev) => [blockedNotif, ...prev])
-      return
+      return { success: false, error: check.reason || 'You do not have permission to execute this status transition.' }
     }
 
+    let apiComplaint: Complaint | null = null
     // Call FastAPI backend to verify & persist status mutation if token exists
     try {
       if (getAuthToken()) {
-        await updateComplaintStatusApi(id, { status: newStatus, remarks: noteText })
+        apiComplaint = await updateComplaintStatusApi(id, {
+          status: newStatus,
+          remarks: noteText,
+          note: noteText,
+          overrideReason: overrideReason?.trim() || undefined,
+        })
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Server rejected status update.'
+      const statusSuffix = err instanceof ApiError ? ` (HTTP ${err.status})` : ''
       const deniedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Status Update Blocked by Server (FastAPI 403)',
+        title: `Status Update Blocked by Server${statusSuffix}`,
         message: errorMsg,
         timestamp: `${TODAY} 11:30`,
         caseId: id,
         read: false,
       }
       setNotifications((prev) => [deniedNotif, ...prev])
-      return
+      return { success: false, error: errorMsg }
     }
+
+    const isTransitionPermitted = (PERMITTED_STATUS_TRANSITIONS[target.status] || []).includes(newStatus)
+    const isAdminOverride = currentUser.role === 'Admin' && (!isTransitionPermitted || target.status === 'Resolved')
+
+    const actionText = isAdminOverride
+      ? `[Admin Override] Status set to ${newStatus} from ${target.status}`
+      : newStatus === 'Resolved'
+      ? 'Case investigation concluded & Marked Resolved'
+      : `Status transitioned to ${newStatus}`
+
+    const noteParts: string[] = []
+    if (noteText && noteText.trim()) {
+      noteParts.push(noteText.trim())
+    }
+    if (isAdminOverride && overrideReason && overrideReason.trim()) {
+      noteParts.push(`Admin Override Reason: ${overrideReason.trim()}`)
+    }
+    const finalNote = noteParts.length > 0 ? noteParts.join(' | ') : undefined
 
     setComplaints((prev) =>
       prev.map((c) => {
         if (c.id === id) {
-          const actionText =
-            newStatus === 'Resolved'
-              ? 'Case investigation concluded & Marked Resolved'
-              : `Status transitioned to ${newStatus}`
-
           return {
             ...c,
-            status: newStatus,
+            ...(apiComplaint || {}),
+            status: apiComplaint?.status || newStatus,
             lastActionDate: TODAY,
-            timeline: [
-              ...c.timeline,
-              {
-                label: actionText,
-                date: `${TODAY} 11:30`,
-                by: `${currentUser.name} (${currentUser.designation})`,
-                role: currentRole,
-                note: noteText,
-              },
-            ],
+            timeline: apiComplaint?.timeline?.length
+              ? apiComplaint.timeline
+              : [
+                  ...c.timeline,
+                  {
+                    label: actionText,
+                    date: `${TODAY} 11:30`,
+                    by: `${currentUser.name} (${currentUser.designation || currentRole})`,
+                    role: currentRole,
+                    note: finalNote,
+                  },
+                ],
           }
         }
         return c
       })
     )
 
+    await syncComplaints()
+
     // Push notification for status advance
     const notif: AppNotification = {
       id: `notif-${Date.now()}`,
       type: newStatus === 'Resolved' ? 'success' : newStatus === 'Escalated' ? 'alert' : 'info',
-      title: `Docket ${id} Updated: ${newStatus}`,
-      message: `Status updated to ${newStatus} by ${currentUser.name} (${currentRole}).`,
+      title: isAdminOverride ? `Docket ${id} Override: ${newStatus}` : `Docket ${id} Updated: ${newStatus}`,
+      message: isAdminOverride
+        ? `Status set to ${newStatus} under Admin override by ${currentUser.name} (${currentRole}). Reason: ${overrideReason}`
+        : `Status updated to ${newStatus} by ${currentUser.name} (${currentRole}).`,
       timestamp: `${TODAY} 11:30`,
       caseId: id,
       read: false,
     }
     setNotifications((prev) => [notif, ...prev])
+    return { success: true }
   }
 
   const handleAssignOfficer = async (id: string, newOfficer: string, reason?: string) => {
@@ -503,7 +743,7 @@ export default function App() {
       const blockedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Assignment Blocked (FastAPI 403 Simulation)',
+        title: 'Assignment Blocked (HTTP 403)',
         message: check.reason || 'You do not have authorization to reassign this case.',
         timestamp: `${TODAY} 11:30`,
         caseId: id,
@@ -513,23 +753,36 @@ export default function App() {
       return
     }
 
-    if (target.officer === newOfficer) return
+    const targetUser = users.find((u) => u.name === newOfficer) || userProfiles.find((u) => u.name === newOfficer)
+    const targetUserId = targetUser?.id
+
+    const currentResolved = resolveOfficerName(target, users)
+    if (currentResolved === newOfficer && target.assignedUserId && target.assignedUserId === targetUserId) {
+      return
+    }
 
     const assignmentReason =
       reason?.trim() ||
       `Administrative officer reassignment within ${target.bureau} Bureau.`
 
+    let apiComplaint: Complaint | null = null
     // Call FastAPI backend to verify & persist assignment if token exists
     try {
       if (getAuthToken()) {
-        await assignComplaintApi(id, { officer: newOfficer, reason: assignmentReason })
+        apiComplaint = await assignComplaintApi(id, {
+          officer: newOfficer,
+          userId: targetUserId,
+          reason: assignmentReason,
+          preserveBureau: true,
+        })
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Server rejected officer reassignment.'
+      const statusSuffix = err instanceof ApiError ? ` (HTTP ${err.status})` : ''
       const deniedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Assignment Blocked by Server (FastAPI 403)',
+        title: `Assignment Blocked by Server${statusSuffix}`,
         message: errorMsg,
         timestamp: `${TODAY} 11:30`,
         caseId: id,
@@ -542,38 +795,50 @@ export default function App() {
     setComplaints((prev) =>
       prev.map((c) => {
         if (c.id === id) {
-          const prevOfficer = c.officer
+          const prevOfficer = resolveOfficerName(c, users)
+          const targetOfficerName = resolveOfficerName(
+            apiComplaint || { officer: newOfficer, assignedUserId: targetUserId },
+            users
+          ) || newOfficer
+          const assignedId = apiComplaint?.assignedUserId || targetUserId || c.assignedUserId
           return {
             ...c,
-            officer: newOfficer,
+            ...(apiComplaint || {}),
+            officer: targetOfficerName,
+            assignedUserId: assignedId,
+            bureau: (apiComplaint?.bureau || c.bureau) as Bureau,
             assignments: [
               ...c.assignments,
               {
-                officer: newOfficer,
+                officer: targetOfficerName,
                 previousOfficer: prevOfficer,
                 date: TODAY,
                 by: `${currentUser.name} (${currentUser.designation})`,
                 byRole: currentRole,
                 reason: assignmentReason,
-                bureau: c.bureau,
+                bureau: (apiComplaint?.bureau || c.bureau) as Bureau,
                 type: 'reassignment',
               },
             ],
-            timeline: [
-              ...c.timeline,
-              {
-                label: `Investigating officer reassigned from ${prevOfficer} to ${newOfficer}`,
-                date: `${TODAY} 11:30`,
-                by: `${currentUser.name} (${currentRole})`,
-                role: currentRole,
-                note: `Administrative Justification: ${assignmentReason}`,
-              },
-            ],
+            timeline: apiComplaint?.timeline?.length
+              ? apiComplaint.timeline
+              : [
+                  ...c.timeline,
+                  {
+                    label: `Investigating officer reassigned from ${prevOfficer} to ${targetOfficerName}`,
+                    date: `${TODAY} 11:30`,
+                    by: `${currentUser.name} (${currentRole})`,
+                    role: currentRole,
+                    note: `Administrative Justification: ${assignmentReason}`,
+                  },
+                ],
           }
         }
         return c
       })
     )
+
+    await syncComplaints()
 
     const notif: AppNotification = {
       id: `notif-${Date.now()}`,
@@ -611,17 +876,27 @@ export default function App() {
       return
     }
 
+    const targetUser = users.find((u) => u.name === newOfficer) || userProfiles.find((u) => u.name === newOfficer)
+    const targetUserId = targetUser?.id
+
+    let apiComplaint: Complaint | null = null
     // Call FastAPI backend to verify & persist transfer if token exists
     try {
       if (getAuthToken()) {
-        await assignComplaintApi(id, { bureau: newBureau, officer: newOfficer, reason })
+        apiComplaint = await assignComplaintApi(id, {
+          bureau: newBureau,
+          officer: newOfficer,
+          userId: targetUserId,
+          reason,
+        })
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Server rejected cross-bureau transfer.'
+      const statusSuffix = err instanceof ApiError ? ` (HTTP ${err.status})` : ''
       const deniedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Cross-Bureau Transfer Blocked by Server (FastAPI 403)',
+        title: `Cross-Bureau Transfer Blocked by Server${statusSuffix}`,
         message: errorMsg,
         timestamp: `${TODAY} 11:30`,
         caseId: id,
@@ -632,45 +907,56 @@ export default function App() {
     }
 
     const prevBureau = target.bureau
-    const prevOfficer = target.officer
+    const prevOfficer = resolveOfficerName(target, users)
+    const targetOfficerName = resolveOfficerName(
+      apiComplaint || { officer: newOfficer, assignedUserId: targetUserId },
+      users
+    ) || newOfficer
+    const assignedId = apiComplaint?.assignedUserId || targetUserId || target.assignedUserId
 
     setComplaints((prev) =>
       prev.map((c) => {
         if (c.id === id) {
           return {
             ...c,
-            bureau: newBureau,
-            officer: newOfficer,
+            ...(apiComplaint || {}),
+            bureau: (apiComplaint?.bureau || newBureau) as Bureau,
+            officer: targetOfficerName,
+            assignedUserId: assignedId,
             lastActionDate: TODAY,
             assignments: [
               ...c.assignments,
               {
-                officer: newOfficer,
+                officer: targetOfficerName,
                 previousOfficer: prevOfficer,
                 date: TODAY,
                 by: `${currentUser.name} (${currentUser.designation})`,
                 byRole: currentRole,
                 reason,
-                bureau: newBureau,
+                bureau: (apiComplaint?.bureau || newBureau) as Bureau,
                 previousBureau: prevBureau,
                 type: 'transfer',
               },
             ],
-            timeline: [
-              ...c.timeline,
-              {
-                label: `Cross-Bureau Transfer: Jurisdiction transferred from ${prevBureau} to ${newBureau}`,
-                date: `${TODAY} 11:30`,
-                by: `${currentUser.name} (${currentRole})`,
-                role: currentRole,
-                note: `Statutory Transfer Reason: ${reason}. Designated officer: ${newOfficer}.`,
-              },
-            ],
+            timeline: apiComplaint?.timeline?.length
+              ? apiComplaint.timeline
+              : [
+                  ...c.timeline,
+                  {
+                    label: `Cross-Bureau Transfer: Jurisdiction transferred from ${prevBureau} to ${newBureau}`,
+                    date: `${TODAY} 11:30`,
+                    by: `${currentUser.name} (${currentRole})`,
+                    role: currentRole,
+                    note: `Statutory Transfer Reason: ${reason}. Designated officer: ${targetOfficerName}.`,
+                  },
+                ],
           }
         }
         return c
       })
     )
+
+    await syncComplaints()
 
     const notif: AppNotification = {
       id: `notif-${Date.now()}`,
@@ -789,16 +1075,20 @@ export default function App() {
           )
 
           let updatedBureau = c.bureau
-          let updatedOfficer = c.officer
+          let updatedOfficer = resolveOfficerName(c, users)
+          let updatedAssignedUserId = c.assignedUserId
           const updatedAssignments = [...c.assignments]
           const newTimelineEvents = [...c.timeline]
 
           if (decision === 'Approved') {
             if (req.type === 'bureau' && req.proposedBureau) {
               const prevBureau = c.bureau
-              const prevOfficer = c.officer
+              const prevOfficer = resolveOfficerName(c, users)
               updatedBureau = req.proposedBureau
-              updatedOfficer = req.proposedOfficer || getOfficersForBureau(req.proposedBureau)[0]
+              const rawProposed = req.proposedOfficer || getOfficersForBureau(req.proposedBureau)[0]
+              const proposedUser = users.find((u) => u.name === rawProposed) || userProfiles.find((u) => u.name === rawProposed)
+              updatedAssignedUserId = proposedUser?.id
+              updatedOfficer = resolveOfficerName({ officer: rawProposed, assignedUserId: updatedAssignedUserId }, users) || rawProposed
 
               updatedAssignments.push({
                 officer: updatedOfficer,
@@ -822,8 +1112,11 @@ export default function App() {
                 }`,
               })
             } else if (req.type === 'officer' && req.proposedOfficer) {
-              const prevOfficer = c.officer
-              updatedOfficer = req.proposedOfficer
+              const prevOfficer = resolveOfficerName(c, users)
+              const rawProposed = req.proposedOfficer
+              const proposedUser = users.find((u) => u.name === rawProposed) || userProfiles.find((u) => u.name === rawProposed)
+              updatedAssignedUserId = proposedUser?.id
+              updatedOfficer = resolveOfficerName({ officer: rawProposed, assignedUserId: updatedAssignedUserId }, users) || rawProposed
 
               updatedAssignments.push({
                 officer: updatedOfficer,
@@ -860,6 +1153,7 @@ export default function App() {
             ...c,
             bureau: updatedBureau,
             officer: updatedOfficer,
+            assignedUserId: updatedAssignedUserId,
             assignments: updatedAssignments,
             reassignmentRequests: updatedRequests,
             timeline: newTimelineEvents,
@@ -912,10 +1206,11 @@ export default function App() {
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Server rejected remark.'
+      const statusSuffix = err instanceof ApiError ? ` (HTTP ${err.status})` : ''
       const deniedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Remark Blocked by Server (FastAPI 403)',
+        title: `Remark Blocked by Server${statusSuffix}`,
         message: errorMsg,
         timestamp: `${TODAY} 11:30`,
         caseId: id,
@@ -977,10 +1272,11 @@ export default function App() {
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Server rejected document upload.'
+      const statusSuffix = err instanceof ApiError ? ` (HTTP ${err.status})` : ''
       const deniedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Document Upload Blocked by Server (FastAPI 403)',
+        title: `Document Upload Blocked by Server${statusSuffix}`,
         message: errorMsg,
         timestamp: `${TODAY} 11:30`,
         caseId: id,
@@ -1026,7 +1322,7 @@ export default function App() {
     setNotifications((prev) => [notif, ...prev])
   }
 
-  const handleAddComplaint = async (newComplaint: Complaint) => {
+  const handleAddComplaint = async (newComplaint: Complaint): Promise<Complaint | null> => {
     // Only Complainants can submit grievances in the current scope
     if (currentRole !== 'Complainant') {
       const blockedNotif: AppNotification = {
@@ -1038,13 +1334,14 @@ export default function App() {
         read: false,
       }
       setNotifications((prev) => [blockedNotif, ...prev])
-      return
+      return null
     }
 
     let complaintToAdd = newComplaint
     try {
       if (getAuthToken()) {
         const created = await createComplaintApi({
+          id: newComplaint.id,
           title: newComplaint.title,
           description: newComplaint.description,
           bureau: newComplaint.bureau,
@@ -1063,17 +1360,18 @@ export default function App() {
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Server rejected complaint creation.'
+      const statusSuffix = err instanceof ApiError ? ` (HTTP ${err.status})` : ''
       const deniedNotif: AppNotification = {
         id: `notif-denied-${Date.now()}`,
         type: 'alert',
-        title: 'Submission Blocked by Server (FastAPI 403/400)',
+        title: `Submission Blocked by Server${statusSuffix}`,
         message: errorMsg,
         timestamp: `${TODAY} 11:00`,
         caseId: newComplaint.id,
         read: false,
       }
       setNotifications((prev) => [deniedNotif, ...prev])
-      return
+      return null
     }
 
     setComplaints((prev) => [complaintToAdd, ...prev])
@@ -1089,6 +1387,7 @@ export default function App() {
       read: false,
     }
     setNotifications((prev) => [newNotif, ...prev])
+    return complaintToAdd
   }
 
   const handleMarkNotificationRead = (id: string) => {
@@ -1098,7 +1397,10 @@ export default function App() {
   }
 
   const handleMarkAllNotificationsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+    const visibleIds = new Set(visibleNotifications.map((n) => n.id))
+    setNotifications((prev) =>
+      prev.map((n) => (visibleIds.has(n.id) ? { ...n, read: true } : n))
+    )
   }
 
   // Session verification loader
@@ -1128,14 +1430,18 @@ export default function App() {
   }
 
   const selectedComplaint = complaints.find((c) => c.id === selectedCaseId)
-  const pendingOverlapsCount = overlaps.filter((o) => !overlapStates[o.id]).length
+  const activeOverlaps = overlapsList || overlaps
+  const activeThreshold = appSettings.similarityThreshold ?? 75
+  const pendingOverlapsCount = activeOverlaps.filter((o) =>
+    isOverlapActivePending(o, overlapStates, activeThreshold)
+  ).length
   const isPagePermitted = ROLE_PERMITTED_PAGES[currentRole].includes(activePage)
 
   return (
     <AppLayout
       activePage={activePage}
       onNavigate={setActivePage}
-      notifications={notifications}
+      notifications={visibleNotifications}
       onMarkNotificationAsRead={handleMarkNotificationRead}
       onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
       currentUser={currentUser}
@@ -1209,6 +1515,7 @@ export default function App() {
             <DetailsPage
               complaint={selectedComplaint}
               onBack={() => setActivePage('complaints')}
+              onOpenCase={handleOpenCase}
               onStatus={handleStatusChange}
               onAssign={handleAssignOfficer}
               onTransferBureau={handleCrossBureauTransfer}
@@ -1241,10 +1548,12 @@ export default function App() {
           {activePage === 'overlaps' && (
             <Overlaps
               complaints={complaints}
+              overlaps={overlapsList}
               onOpen={handleOpenCase}
               currentRole={currentRole}
               currentUser={currentUser}
               overlapStates={overlapStates}
+              similarityThreshold={appSettings.similarityThreshold}
               onUpdateOverlapState={handleUpdateOverlapState}
             />
           )}
@@ -1264,7 +1573,7 @@ export default function App() {
 
           {activePage === 'notifications' && (
             <NotificationsPage
-              notifications={notifications}
+              notifications={visibleNotifications}
               onMarkAsRead={handleMarkNotificationRead}
               onMarkAllAsRead={handleMarkAllNotificationsRead}
               onOpenCase={handleOpenCase}
@@ -1281,7 +1590,13 @@ export default function App() {
           )}
 
           {activePage === 'settings' && (
-            <Settings currentRole={currentRole} currentUser={currentUser} />
+            <Settings
+              currentRole={currentRole}
+              currentUser={currentUser}
+              settings={appSettings}
+              onUpdateSettings={handleUpdateSettings}
+              onResetSettings={handleResetSettings}
+            />
           )}
         </>
       )}

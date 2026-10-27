@@ -30,7 +30,7 @@ interface SidebarProps {
   unreadNotificationsCount: number
   pendingOverlapsCount: number
   currentRole: Role
-  onSelectRole: (role: Role) => void
+  onSelectRole: (role: Role, userId?: string) => void
   onSignOut?: () => void
   currentUser?: UserProfile
 }
@@ -286,26 +286,31 @@ export default function Sidebar({
             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Switch Demo Role
             </div>
-            {(['Complainant', 'BureauAdmin', 'Officer', 'Admin'] as Role[]).map((r) => {
-              const meta = ROLE_INFO[r]
-              const isCur = currentRole === r
+            {[
+              { role: 'Complainant' as Role, label: 'Citizen (Rohit Sharma)', scope: 'Submit grievances & track dockets', userId: 'u0' },
+              { role: 'BureauAdmin' as Role, label: 'Bureau Head (Dr. Priya Nair)', scope: 'PGRC Bureau oversight & assignments', userId: 'u1b' },
+              { role: 'Officer' as Role, label: 'Officer (Rajesh Kumar)', scope: 'PGRC Investigating Officer', userId: 'u2' },
+              { role: 'Officer' as Role, label: 'Officer (Anita Verma)', scope: 'RB Investigating Officer', userId: 'u3' },
+              { role: 'Admin' as Role, label: 'System Admin (Dr. S. Mehta)', scope: 'All bureaus statutory oversight', userId: 'u1' },
+            ].map((opt) => {
+              const isCur = currentUser?.id === opt.userId || (currentRole === opt.role && !currentUser?.id)
               return (
                 <button
-                  key={r}
+                  key={`${opt.role}-${opt.userId}`}
                   type="button"
                   onClick={() => {
-                    onSelectRole(r)
+                    onSelectRole(opt.role, opt.userId)
                     setShowRoleMenu(false)
                   }}
                   className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between transition ${
                     isCur ? 'bg-teal-500/20 text-teal-300 font-bold' : 'hover:bg-white/10 text-slate-300'
                   }`}
                 >
-                  <div>
-                    <div className="leading-tight">{meta.name}</div>
-                    <div className="text-[10px] text-slate-400">{meta.scope}</div>
+                  <div className="truncate">
+                    <div className="leading-tight truncate">{opt.label}</div>
+                    <div className="text-[10px] text-slate-400 truncate">{opt.scope}</div>
                   </div>
-                  {isCur && <span className="text-[10px] text-teal-300 font-mono">Active</span>}
+                  {isCur && <span className="text-[10px] text-teal-300 font-mono shrink-0 ml-1">Active</span>}
                 </button>
               )
             })}

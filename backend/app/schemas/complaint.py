@@ -118,9 +118,18 @@ class ComplaintStatusUpdate(BaseModel):
     remarks: Optional[str] = Field(None, description="Updated case remarks")
     nextAction: Optional[str] = Field(None, alias="nextAction", description="Next workflow action")
     note: Optional[str] = Field(None, description="Timeline event narrative note")
-    by: Optional[str] = Field(None, description="Actor display name")
-    role: Optional[str] = Field(None, description="Actor role: Admin, BureauAdmin, Officer")
-    userId: Optional[str] = Field(None, alias="userId", description="ID of executing user")
+    by: Optional[str] = Field(None, description="Actor display name (informational only; actor is always derived from JWT)")
+    role: Optional[str] = Field(None, description="Actor role (informational only; role is always derived from JWT)")
+    userId: Optional[str] = Field(None, alias="userId", description="ID of executing user (informational only; derived from JWT)")
+    overrideReason: Optional[str] = Field(
+        None,
+        alias="overrideReason",
+        description=(
+            "System Admin only: Non-empty justification required to perform a status transition that "
+            "bypasses normal workflow rules (e.g. re-opening Resolved cases). Must not be blank. "
+            "Recorded verbatim in the case timeline."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
@@ -137,8 +146,17 @@ class ComplaintAssignmentUpdate(BaseModel):
     officer: Optional[str] = Field(None, description="Name of target officer (e.g. 'Rajesh Kumar')")
     bureau: Optional[str] = Field(None, description="Target bureau (e.g. 'PGRC', 'RB', 'Approval', etc.)")
     reason: Optional[str] = Field(None, description="Administrative justification for assignment")
-    by: Optional[str] = Field(None, description="Actor display name")
-    byRole: Optional[str] = Field(None, alias="byRole", description="Actor role: Admin, BureauAdmin")
+    by: Optional[str] = Field(None, description="Actor display name (informational only; derived from JWT)")
+    byRole: Optional[str] = Field(None, alias="byRole", description="Actor role (informational only; derived from JWT)")
+    preserveBureau: Optional[bool] = Field(
+        None,
+        alias="preserveBureau",
+        description=(
+            "If True, the complaint's current bureau is kept unchanged regardless of the target officer's home bureau. "
+            "Ordinary officer reassignment should set this to True. Cross-bureau transfer should leave it False/None "
+            "and pass an explicit bureau. Defaults to False (legacy behaviour: officer's home bureau wins)."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 

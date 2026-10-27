@@ -27,7 +27,7 @@ import {
   Users,
 } from 'lucide-react'
 import type { Complaint, Role, Status, UserProfile } from '../types'
-import { BUREAU_INFO, institutions, isOverdue } from '../data'
+import { BUREAU_INFO, institutions, isOverdue, resolveOfficerName } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle, SearchBox } from '../components/ui'
 
 interface InstitutionsProps {
@@ -166,7 +166,7 @@ export default function Institutions({
         list.push({
           date: c.date,
           label: 'Grievance Docket Registered & Scrutiny Initiated',
-          by: c.officer,
+          by: resolveOfficerName(c),
           caseId: c.id,
           bureau: c.bureau,
           status: c.status,
@@ -198,7 +198,7 @@ export default function Institutions({
       }
       const matchesSearch =
         !complaintSearch.trim() ||
-        `${c.id} ${c.title} ${c.description} ${c.category} ${c.officer}`
+        `${c.id} ${c.title} ${c.description} ${c.category} ${resolveOfficerName(c)}`
           .toLowerCase()
           .includes(complaintSearch.toLowerCase().trim())
 

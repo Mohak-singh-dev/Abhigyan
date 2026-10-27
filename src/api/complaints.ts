@@ -23,6 +23,8 @@ import type {
 export interface ComplaintStatusUpdatePayload {
   status: Status
   remarks?: string
+  note?: string
+  overrideReason?: string
 }
 
 export interface ComplaintAssignPayload {
@@ -30,6 +32,7 @@ export interface ComplaintAssignPayload {
   userId?: string
   bureau?: string
   reason?: string
+  preserveBureau?: boolean
 }
 
 export interface TimelineNoteCreatePayload {
@@ -38,6 +41,7 @@ export interface TimelineNoteCreatePayload {
 }
 
 export interface ComplaintCreatePayload {
+  id?: string
   title: string
   description: string
   bureau: string

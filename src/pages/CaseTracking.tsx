@@ -27,13 +27,14 @@ import {
   getInstitution,
   instName,
   isOverdue,
+  resolveOfficerName,
 } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle, SearchBox } from '../components/ui'
 
 interface CaseTrackingProps {
   complaints: Complaint[]
   onOpen: (id: string) => void
-  onStatus: (id: string, s: Status, note?: string) => void
+  onStatus: (id: string, s: Status, note?: string, overrideReason?: string) => Promise<{ success: boolean; error?: string } | void> | void
   onAddNote?: (id: string, noteText: string) => void
   currentRole?: Role
   currentUser?: UserProfile
@@ -50,6 +51,7 @@ export default function CaseTracking({
   const [selectedCaseId, setSelectedCaseId] = useState(complaints[0]?.id || '')
   const [searchQuery, setSearchQuery] = useState('')
   const [followUpNote, setFollowUpNote] = useState('')
+  const [statusError, setStatusError] = useState<string | null>(null)
 
   // Scoped complaints list based on role
   const roleScopedComplaints = complaints.filter((c) => {
@@ -63,6 +65,7 @@ export default function CaseTracking({
     if (currentRole === 'Officer') {
       return (
         c.officer === currentUser?.name ||
+        resolveOfficerName(c) === currentUser?.name ||
         Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
       )
     }
@@ -493,7 +496,7 @@ export default function CaseTracking({
                   <span className="font-semibold text-slate-800">
                     {currentRole === 'Complainant'
                       ? `${activeComplaint.bureau} Grievance Officer`
-                      : activeComplaint.officer}
+                      : resolveOfficerName(activeComplaint)}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -516,19 +519,61 @@ export default function CaseTracking({
                     </span>
                   </div>
 
+                  {statusError && (
+                    <div className="mb-2.5 rounded-lg bg-rose-50 border border-rose-200 p-2 text-xs text-rose-800 flex items-start gap-1.5">
+                      <AlertTriangle size={13} className="shrink-0 mt-0.5 text-rose-600" />
+                      <div>
+                        <span className="font-bold">Status Update Failed:</span> {statusError}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     {activeComplaint.status === 'Pending' && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => onStatus(activeComplaint.id, 'In Progress')}
-                        disabled={
-                          !canUpdateCaseStatus(currentUser, activeComplaint, 'In Progress').allowed
-                        }
-                        className="w-full text-xs"
-                      >
-                        Start Preliminary Inquiry (In Progress)
-                      </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={async () => {
+                            setStatusError(null)
+                            try {
+                              const res = await onStatus(activeComplaint.id, 'In Progress')
+                              if (res && typeof res === 'object' && res.success === false) {
+                                setStatusError(res.error || 'Status update failed.')
+                              }
+                            } catch (err: unknown) {
+                              setStatusError(err instanceof Error ? err.message : String(err))
+                            }
+                          }}
+                          disabled={
+                            !canUpdateCaseStatus(currentUser, activeComplaint, 'In Progress').allowed
+                          }
+                          className="text-xs"
+                        >
+                          Start Inquiry (In Progress)
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            setStatusError(null)
+                            try {
+                              const res = await onStatus(activeComplaint.id, 'Escalated')
+                              if (res && typeof res === 'object' && res.success === false) {
+                                setStatusError(res.error || 'Status update failed.')
+                              }
+                            } catch (err: unknown) {
+                              setStatusError(err instanceof Error ? err.message : String(err))
+                            }
+                          }}
+                          disabled={
+                            !canUpdateCaseStatus(currentUser, activeComplaint, 'Escalated').allowed
+                          }
+                          className="text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                        >
+                          Escalate Docket
+                        </Button>
+                      </div>
                     )}
 
                     {activeComplaint.status === 'In Progress' && (
@@ -536,7 +581,17 @@ export default function CaseTracking({
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => onStatus(activeComplaint.id, 'Escalated')}
+                          onClick={async () => {
+                            setStatusError(null)
+                            try {
+                              const res = await onStatus(activeComplaint.id, 'Escalated')
+                              if (res && typeof res === 'object' && res.success === false) {
+                                setStatusError(res.error || 'Status update failed.')
+                              }
+                            } catch (err: unknown) {
+                              setStatusError(err instanceof Error ? err.message : String(err))
+                            }
+                          }}
                           disabled={
                             !canUpdateCaseStatus(currentUser, activeComplaint, 'Escalated').allowed
                           }
@@ -547,7 +602,17 @@ export default function CaseTracking({
                         <Button
                           variant="teal"
                           size="sm"
-                          onClick={() => onStatus(activeComplaint.id, 'Resolved')}
+                          onClick={async () => {
+                            setStatusError(null)
+                            try {
+                              const res = await onStatus(activeComplaint.id, 'Resolved')
+                              if (res && typeof res === 'object' && res.success === false) {
+                                setStatusError(res.error || 'Status update failed.')
+                              }
+                            } catch (err: unknown) {
+                              setStatusError(err instanceof Error ? err.message : String(err))
+                            }
+                          }}
                           disabled={
                             !canUpdateCaseStatus(currentUser, activeComplaint, 'Resolved').allowed
                           }
@@ -563,7 +628,17 @@ export default function CaseTracking({
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => onStatus(activeComplaint.id, 'In Progress')}
+                          onClick={async () => {
+                            setStatusError(null)
+                            try {
+                              const res = await onStatus(activeComplaint.id, 'In Progress')
+                              if (res && typeof res === 'object' && res.success === false) {
+                                setStatusError(res.error || 'Status update failed.')
+                              }
+                            } catch (err: unknown) {
+                              setStatusError(err instanceof Error ? err.message : String(err))
+                            }
+                          }}
                           disabled={
                             !canUpdateCaseStatus(currentUser, activeComplaint, 'In Progress').allowed
                           }
@@ -574,7 +649,17 @@ export default function CaseTracking({
                         <Button
                           variant="teal"
                           size="sm"
-                          onClick={() => onStatus(activeComplaint.id, 'Resolved')}
+                          onClick={async () => {
+                            setStatusError(null)
+                            try {
+                              const res = await onStatus(activeComplaint.id, 'Resolved')
+                              if (res && typeof res === 'object' && res.success === false) {
+                                setStatusError(res.error || 'Status update failed.')
+                              }
+                            } catch (err: unknown) {
+                              setStatusError(err instanceof Error ? err.message : String(err))
+                            }
+                          }}
                           disabled={
                             !canUpdateCaseStatus(currentUser, activeComplaint, 'Resolved').allowed
                           }
@@ -586,8 +671,37 @@ export default function CaseTracking({
                     )}
 
                     {activeComplaint.status === 'Resolved' && (
-                      <div className="rounded bg-slate-100 p-2.5 text-center text-[11px] text-slate-600 font-semibold border border-slate-200">
-                        Docket Resolved &amp; Closed (Terminal State)
+                      <div className="space-y-2">
+                        <div className="rounded bg-slate-100 p-2.5 text-center text-[11px] text-slate-600 font-semibold border border-slate-200">
+                          Docket Resolved &amp; Closed (Terminal State)
+                        </div>
+                        {currentUser?.role === 'Admin' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              setStatusError(null)
+                              const reason = window.prompt(
+                                `[System Admin Override] Reopen Resolved Case ${activeComplaint.id} to "In Progress".\n\nPlease enter the mandatory statutory override reason:`
+                              )
+                              if (!reason || !reason.trim()) {
+                                setStatusError('Status update cancelled: an explicit override reason is mandatory for System Admin override.')
+                                return
+                              }
+                              try {
+                                const res = await onStatus(activeComplaint.id, 'In Progress', undefined, reason.trim())
+                                if (res && typeof res === 'object' && res.success === false) {
+                                  setStatusError(res.error || 'Status update failed.')
+                                }
+                              } catch (err: unknown) {
+                                setStatusError(err instanceof Error ? err.message : String(err))
+                              }
+                            }}
+                            className="w-full text-xs text-navy-800 border-navy-300 hover:bg-navy-50"
+                          >
+                            Reopen Docket (Admin Override)
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>

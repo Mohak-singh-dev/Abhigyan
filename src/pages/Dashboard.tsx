@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   AlertCircle,
   AlertTriangle,
@@ -33,15 +33,15 @@ import {
   YAxis,
 } from 'recharts'
 import type { Complaint, Page, Role, Status, UserProfile } from '../types'
-import { BUREAUS, BUREAU_INFO, CURRENT_OFFICER, TODAY, isOverdue, overlaps } from '../data'
-import { DEFAULT_OVERLAP_STATES, OVERLAP_STORAGE_KEYS } from './Overlaps'
+import { BUREAUS, BUREAU_INFO, CURRENT_OFFICER, TODAY, isOverdue, overlaps, resolveOfficerName, getAppSettings } from '../data'
+import { DEFAULT_OVERLAP_STATES, OVERLAP_STORAGE_KEYS, isOverlapActivePending } from './Overlaps'
 import { Button, Card, CardHeader, PageTitle, Stat } from '../components/ui'
 import ComplaintTable from '../components/ComplaintTable'
 
 interface DashboardProps {
   complaints: Complaint[]
   onOpen: (id: string) => void
-  onStatus: (id: string, s: Status) => void
+  onStatus?: (id: string, s: Status, note?: string, overrideReason?: string) => Promise<{ success: boolean; error?: string } | void> | void
   onNavigate: (page: Page) => void
   currentRole: Role
   currentUser?: UserProfile
@@ -59,14 +59,41 @@ export default function Dashboard({
 }: DashboardProps) {
   const [bureauFilter, setBureauFilter] = useState<string>('All')
 
+  // Scope complaints based on active authenticated role and identity
+  const scopedComplaints = useMemo(() => {
+    if (currentRole === 'Complainant') {
+      return complaints.filter((c) =>
+        Boolean(
+          currentUser?.email &&
+          c.complainantEmail &&
+          c.complainantEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase()
+        )
+      )
+    }
+    if (currentRole === 'Officer') {
+      return complaints.filter((c) =>
+        c.officer === currentUser?.name ||
+        resolveOfficerName(c) === currentUser?.name ||
+        Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
+      )
+    }
+    if (currentRole === 'BureauAdmin') {
+      return complaints.filter((c) =>
+        currentUser?.bureau === 'All' ||
+        c.bureau.toUpperCase() === (currentUser?.bureau || '').toUpperCase()
+      )
+    }
+    return complaints
+  }, [complaints, currentRole, currentUser])
+
   // Calculated statistics
-  const totalCases = complaints.length
-  const pendingCases = complaints.filter((c) => c.status === 'Pending').length
-  const inProgressCases = complaints.filter((c) => c.status === 'In Progress').length
-  const resolvedCases = complaints.filter((c) => c.status === 'Resolved').length
-  const escalatedCases = complaints.filter((c) => c.status === 'Escalated').length
-  const overdueCases = complaints.filter(isOverdue).length
-  const criticalHighCases = complaints.filter(
+  const totalCases = scopedComplaints.length
+  const pendingCases = scopedComplaints.filter((c) => c.status === 'Pending').length
+  const inProgressCases = scopedComplaints.filter((c) => c.status === 'In Progress').length
+  const resolvedCases = scopedComplaints.filter((c) => c.status === 'Resolved').length
+  const escalatedCases = scopedComplaints.filter((c) => c.status === 'Escalated').length
+  const overdueCases = scopedComplaints.filter(isOverdue).length
+  const criticalHighCases = scopedComplaints.filter(
     (c) => c.priority === 'Critical' || c.priority === 'High'
   ).length
   const pendingOverlaps =
@@ -76,22 +103,23 @@ export default function Dashboard({
           try {
             const stored = localStorage.getItem(OVERLAP_STORAGE_KEYS.STATES)
             const states = stored ? JSON.parse(stored) : DEFAULT_OVERLAP_STATES
-            return overlaps.filter((o) => !states[o.id]).length
+            const threshold = getAppSettings().similarityThreshold ?? 75
+            return overlaps.filter((o) => isOverlapActivePending(o, states, threshold)).length
           } catch {
-            return overlaps.filter((o) => !DEFAULT_OVERLAP_STATES[o.id]).length
+            return overlaps.filter((o) => isOverlapActivePending(o, DEFAULT_OVERLAP_STATES, 75)).length
           }
         })()
   const resolutionRate = Math.round((resolvedCases / totalCases) * 100) || 0
 
   // Filtered recent cases
-  const recentCases = complaints
+  const recentCases = scopedComplaints
     .filter((c) => bureauFilter === 'All' || c.bureau === bureauFilter)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5)
 
   // Chart Data: Bureaus
   const bureauData = BUREAUS.map((b) => {
-    const list = complaints.filter((c) => c.bureau === b)
+    const list = scopedComplaints.filter((c) => c.bureau === b)
     return {
       name: b,
       Resolved: list.filter((c) => c.status === 'Resolved').length,
@@ -104,10 +132,10 @@ export default function Dashboard({
 
   // Priority Distribution Chart Data
   const priorityData = [
-    { name: 'Critical', value: complaints.filter((c) => c.priority === 'Critical').length, color: '#dc2626' },
-    { name: 'High', value: complaints.filter((c) => c.priority === 'High').length, color: '#ea580c' },
-    { name: 'Medium', value: complaints.filter((c) => c.priority === 'Medium').length, color: '#d97706' },
-    { name: 'Low', value: complaints.filter((c) => c.priority === 'Low').length, color: '#64748b' },
+    { name: 'Critical', value: scopedComplaints.filter((c) => c.priority === 'Critical').length, color: '#dc2626' },
+    { name: 'High', value: scopedComplaints.filter((c) => c.priority === 'High').length, color: '#ea580c' },
+    { name: 'Medium', value: scopedComplaints.filter((c) => c.priority === 'Medium').length, color: '#d97706' },
+    { name: 'Low', value: scopedComplaints.filter((c) => c.priority === 'Low').length, color: '#64748b' },
   ]
 
   return (

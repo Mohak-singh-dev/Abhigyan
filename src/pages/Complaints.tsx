@@ -17,6 +17,7 @@ import {
   Filter,
   History,
   Info,
+  Link2,
   Loader2,
   Lock,
   Paperclip,
@@ -33,8 +34,9 @@ import {
   UserCog,
   X,
 } from 'lucide-react'
-import type { Bureau, CaseDocument, Complaint, Priority, ReassignmentRequest, Role, Status, UserProfile, AIClassificationResult } from '../types'
+import type { Bureau, CaseDocument, Complaint, LinkedDocket, Priority, ReassignmentRequest, Role, Status, UserProfile, AIClassificationResult } from '../types'
 import { classifyComplaintPreview, createComplaintApi } from '../api/complaints'
+import { getLinkedDocketsApi } from '../api/overlaps'
 import {
   BUREAUS,
   BUREAU_INFO,
@@ -58,6 +60,8 @@ import {
   instName,
   institutions,
   isOverdue,
+  resolveOfficerName,
+  userProfiles,
 } from '../data'
 import { Badge, Button, Card, CardHeader, Modal, PageTitle, SearchBox } from '../components/ui'
 import ComplaintTable from '../components/ComplaintTable'
@@ -65,7 +69,7 @@ import ComplaintTable from '../components/ComplaintTable'
 interface ComplaintsPageProps {
   complaints: Complaint[]
   onOpen: (id: string) => void
-  onStatus: (id: string, s: Status, note?: string) => void
+  onStatus: (id: string, s: Status, note?: string, overrideReason?: string) => Promise<{ success: boolean; error?: string } | void> | void
   onAddComplaint?: (newComplaint: Complaint) => void
   onNavigateToInstitution?: (instId: string) => void
   onNavigateToSubmit?: () => void
@@ -103,6 +107,7 @@ export function ComplaintsPage({
       // Officers can view ONLY cases explicitly assigned to them
       return (
         c.officer === currentUser?.name ||
+        resolveOfficerName(c) === currentUser?.name ||
         Boolean(currentUser?.id && c.assignedUserId === currentUser.id)
       )
     }
@@ -118,13 +123,17 @@ export function ComplaintsPage({
 
   const filtered = roleScopedComplaints.filter((c) => {
     const inst = institutions.find((i) => i.id === c.institutionId)
-    const text = `${c.id} ${c.title} ${c.category} ${c.officer} ${c.institutionPermanentId || ''} ${inst?.name || ''} ${inst?.city || ''}`.toLowerCase()
+    const text = `${c.id} ${c.title} ${c.category} ${resolveOfficerName(c)} ${c.officer} ${c.institutionPermanentId || ''} ${inst?.name || ''} ${inst?.city || ''}`.toLowerCase()
     const matchesSearch = !q.trim() || text.includes(q.toLowerCase().trim())
     const matchesBureau = bureau === 'All' || c.bureau === bureau
     const matchesStatus = status === 'All' || c.status === status
     const matchesPriority = priority === 'All' || c.priority === priority
     const matchesComplainant = complainant === 'All' || c.complainantType === complainant
-    const matchesOfficer = officerFilter === 'All' || officerFilter === 'MyAssigned' || c.officer === officerFilter
+    const matchesOfficer =
+      officerFilter === 'All' ||
+      officerFilter === 'MyAssigned' ||
+      resolveOfficerName(c) === officerFilter ||
+      c.officer === officerFilter
     return matchesSearch && matchesBureau && matchesStatus && matchesPriority && matchesComplainant && matchesOfficer
   })
 
@@ -157,7 +166,7 @@ export function ComplaintsPage({
       c.bureau,
       `"${c.category}"`,
       c.priority,
-      `"${c.officer}"`,
+      `"${resolveOfficerName(c)}"`,
       c.status,
       c.date,
       c.due,
@@ -342,7 +351,7 @@ export function ComplaintsPage({
       <ComplaintTable
         rows={filtered}
         onOpen={onOpen}
-        onStatus={(id, s) => onStatus(id, s)}
+        onStatus={onStatus}
         currentRole={currentRole}
         currentUser={currentUser}
       />
@@ -356,7 +365,7 @@ export function ComplaintsPage({
 
 interface SubmitComplaintProps {
   complaints: Complaint[]
-  onSubmit: (newComplaint: Complaint) => void
+  onSubmit: (newComplaint: Complaint) => Promise<Complaint | null> | void
   onCancel: () => void
   onTrackCase: (caseId: string) => void
   currentRole?: Role
@@ -683,38 +692,20 @@ export function SubmitComplaint({
       lastActionDate: TODAY,
     }
 
+    setIsSubmitting(true)
     try {
-      // Attempt live backend API submission with AI advisory integration
-      const apiResponse = await createComplaintApi({
-        title: title.trim(),
-        description: description.trim(),
-        bureau,
-        category,
-        priority,
-        institutionId: selectedInstId,
-        institutionPermanentId: permanentIdInput.trim() || institutions[0].aicteId,
-        complainantType,
-        complainantName: complainantName.trim() || currentUser?.name || 'Citizen Complainant',
-        complainantEmail: complainantEmail.trim() || currentUser?.email || 'citizen@gov.in',
-        complainantPhone: complainantPhone.trim(),
-      })
-
-      if (apiResponse && apiResponse.id) {
-        newCase = {
-          ...newCase,
-          ...apiResponse,
-          documents: attachedFiles,
-          timeline: (apiResponse.timeline && apiResponse.timeline.length > 0) ? apiResponse.timeline : newCase.timeline,
-        }
+      const authoritative = await onSubmit(newCase)
+      if (authoritative === null) {
+        setFormError('Grievance submission could not be completed. Please check your notifications for details.')
+        return
       }
+      setSubmittedCase(authoritative || newCase)
     } catch (apiErr) {
       console.warn('Backend API submission skipped or failed, storing locally:', apiErr)
+      setSubmittedCase(newCase)
     } finally {
       setIsSubmitting(false)
     }
-
-    onSubmit(newCase)
-    setSubmittedCase(newCase)
   }
 
   // Confirmation Receipt Screen
@@ -1467,7 +1458,8 @@ export function SubmitComplaint({
 interface DetailsPageProps {
   complaint?: Complaint
   onBack: () => void
-  onStatus: (id: string, s: Status, note?: string) => void
+  onOpenCase?: (id: string) => void
+  onStatus: (id: string, s: Status, note?: string, overrideReason?: string) => Promise<{ success: boolean; error?: string } | void> | void
   onAssign: (id: string, o: string, reason?: string) => void
   onTransferBureau?: (id: string, newBureau: Bureau, newOfficer: string, reason: string) => void
   onRequestReassignment?: (
@@ -1490,6 +1482,7 @@ interface DetailsPageProps {
 export function DetailsPage({
   complaint: c,
   onBack,
+  onOpenCase,
   onStatus,
   onAssign,
   onTransferBureau,
@@ -1502,7 +1495,7 @@ export function DetailsPage({
   currentUser,
 }: DetailsPageProps) {
   const [newRemark, setNewRemark] = useState('')
-  const [selectedOfficer, setSelectedOfficer] = useState(c?.officer || OFFICERS[0])
+  const [selectedOfficer, setSelectedOfficer] = useState(resolveOfficerName(c) || OFFICERS[0])
   const [isDocModalOpen, setIsDocModalOpen] = useState(false)
   const [docUploadName, setDocUploadName] = useState('')
   const [docUploadSize, setDocUploadSize] = useState('650 KB')
@@ -1511,7 +1504,28 @@ export function DetailsPage({
   const [docUploadFileType, setDocUploadFileType] = useState<string>('application/pdf')
   const [previewDoc, setPreviewDoc] = useState<CaseDocument | null>(null)
   const [statusRemarkModal, setStatusRemarkModal] = useState<Status | null>(null)
+  const [linkedDockets, setLinkedDockets] = useState<LinkedDocket[]>([])
+
+  useEffect(() => {
+    let active = true
+    if (c?.id) {
+      getLinkedDocketsApi(c.id)
+        .then((data) => {
+          if (active) setLinkedDockets(data)
+        })
+        .catch(() => {
+          if (active) setLinkedDockets([])
+        })
+    } else {
+      setLinkedDockets([])
+    }
+    return () => {
+      active = false
+    }
+  }, [c?.id])
   const [statusRemarkText, setStatusRemarkText] = useState('')
+  const [statusOverrideReason, setStatusOverrideReason] = useState('')
+  const [statusError, setStatusError] = useState<string | null>(null)
 
   // Reassignment Modal state
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
@@ -1535,7 +1549,7 @@ export function DetailsPage({
     BUREAUS.find((b) => b !== c?.bureau) || 'RB'
   )
   const [requestTargetOfficer, setRequestTargetOfficer] = useState(
-    getOfficersForBureau(c?.bureau || 'PGRC').find((o) => o !== c?.officer) || OFFICERS[0]
+    getOfficersForBureau(c?.bureau || 'PGRC').find((o) => o !== resolveOfficerName(c)) || OFFICERS[0]
   )
   const [requestReason, setRequestReason] = useState('')
 
@@ -1611,7 +1625,12 @@ export function DetailsPage({
   }
 
   const handleOfficerSelectChange = (officer: string) => {
-    if (officer === c.officer) return
+    if (!officer || officer === 'Unassigned') return
+    const currentResolved = resolveOfficerName(c)
+    const targetUser = userProfiles.find((u) => u.name === officer)
+    if (officer === currentResolved && c?.assignedUserId && c.assignedUserId === targetUser?.id) {
+      return
+    }
     setPendingOfficer(officer)
     setAssignReason('')
     setIsAssignModalOpen(true)
@@ -1708,11 +1727,34 @@ export function DetailsPage({
     setIsDocModalOpen(false)
   }
 
-  const handleConfirmStatusChange = () => {
+  const isTransitionPermitted = (PERMITTED_STATUS_TRANSITIONS[c.status] || []).includes(statusRemarkModal as Status)
+  const isAdminOverride = currentUser?.role === 'Admin' && (!isTransitionPermitted || c.status === 'Resolved')
+
+  const handleConfirmStatusChange = async () => {
     if (statusRemarkModal) {
-      onStatus(c.id, statusRemarkModal, statusRemarkText.trim() || undefined)
-      setStatusRemarkModal(null)
-      setStatusRemarkText('')
+      if (isAdminOverride && !statusOverrideReason.trim()) {
+        setStatusError('An explicit override reason is mandatory for System Admin override.')
+        return
+      }
+      setStatusError(null)
+      try {
+        const res = await onStatus(
+          c.id,
+          statusRemarkModal,
+          statusRemarkText.trim() || undefined,
+          isAdminOverride ? statusOverrideReason.trim() : undefined
+        )
+        if (res && typeof res === 'object' && res.success === false) {
+          setStatusError(res.error || 'Status update failed.')
+          return
+        }
+        setStatusRemarkModal(null)
+        setStatusRemarkText('')
+        setStatusOverrideReason('')
+        setStatusError(null)
+      } catch (err: unknown) {
+        setStatusError(err instanceof Error ? err.message : String(err))
+      }
     }
   }
 
@@ -1740,15 +1782,23 @@ export function DetailsPage({
             {permittedStatuses.length > 0 ? (
               <select
                 value={c.status}
-                onChange={(e) => setStatusRemarkModal(e.target.value as Status)}
+                onChange={(e) => {
+                  setStatusError(null)
+                  setStatusRemarkModal(e.target.value as Status)
+                }}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 shadow-2xs focus:border-navy-600 focus:outline-none"
               >
                 <option value={c.status}>{c.status} (Current)</option>
-                {permittedStatuses.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+                {permittedStatuses.map((s) => {
+                  const isOverride =
+                    currentUser?.role === 'Admin' &&
+                    (!PERMITTED_STATUS_TRANSITIONS[c.status]?.includes(s) || c.status === 'Resolved')
+                  return (
+                    <option key={s} value={s}>
+                      {s} {isOverride ? '(Admin Override)' : ''}
+                    </option>
+                  )
+                })}
               </select>
             ) : (
               <div className="flex items-center gap-1.5">
@@ -1845,6 +1895,68 @@ export function DetailsPage({
           </div>
         </div>
       </Card>
+
+      {/* Linked Docket Indicator (Phase 2 Cross-Bureau Overlap Confirmation) */}
+      {linkedDockets.length > 0 && (
+        <Card className="border-l-4 border-l-teal-600 bg-gradient-to-r from-teal-50/70 via-teal-50/20 to-white p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 w-full">
+              <div className="rounded-lg bg-teal-100 p-2 text-teal-700 mt-0.5 flex-shrink-0">
+                <Link2 size={20} />
+              </div>
+              <div className="space-y-1.5 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-teal-900">
+                    Cross-Bureau Linked Docket Notice
+                  </span>
+                  <span className="rounded-full bg-teal-200/80 px-2 py-0.5 text-[10px] font-extrabold uppercase text-teal-900">
+                    Confirmed Corroboration
+                  </span>
+                </div>
+                <p className="text-xs text-slate-700">
+                  This grievance has been confirmed as related to parallel docket(s) across bureaus. Both complaints remain
+                  <strong> independent statutory dockets</strong> with their own distinct officer assignment and timeline.
+                </p>
+                <div className="mt-2 space-y-2">
+                  {linkedDockets.map((ld) => (
+                    <div
+                      key={ld.overlapId}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-teal-200/70 bg-white p-2.5 text-xs shadow-2xs"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono font-bold text-navy-900">{ld.caseId}</span>
+                        <Badge v={ld.bureau} />
+                        <span className="font-semibold text-slate-800">{ld.title}</span>
+                        <span className="text-[11px] font-mono text-teal-700 font-bold bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">
+                          {ld.similarity}% Match
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {ld.justification && (
+                          <span className="text-[11px] text-slate-500 italic max-w-xs truncate" title={ld.justification}>
+                            "{ld.justification}"
+                          </span>
+                        )}
+                        {onOpenCase && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onOpenCase(ld.caseId)}
+                            className="text-xs h-7 px-2"
+                          >
+                            <span>Open Linked Case</span>
+                            <ExternalLink size={11} />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid gap-6 lg:grid-cols-3">
@@ -2169,14 +2281,14 @@ export function DetailsPage({
               {/* Bureau Jurisdiction Status Box */}
               <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-navy-800 text-white font-bold text-sm">
-                  {currentRole === 'Complainant' ? 'AI' : c.officer.slice(0, 1)}
+                  {currentRole === 'Complainant' ? 'AI' : resolveOfficerName(c).slice(0, 1)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="text-xs font-bold text-slate-900 truncate">
                       {currentRole === 'Complainant'
                         ? `${c.bureau} Grievance In-Charge`
-                        : c.officer}
+                        : resolveOfficerName(c)}
                     </h4>
                     <span className="text-[10px] text-teal-700 font-semibold bg-teal-50 px-2 py-0.5 rounded border border-teal-200 flex-shrink-0">
                       Active Docket
@@ -2212,13 +2324,16 @@ export function DetailsPage({
                     <span className="text-[10px] text-indigo-700 font-medium">System Admin Authority</span>
                   </div>
                   <select
-                    value={c.officer}
+                    value={resolveOfficerName(c)}
                     onChange={(e) => handleOfficerSelectChange(e.target.value)}
                     className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs font-medium text-slate-800 focus:border-navy-600 focus:outline-none"
                   >
+                    {resolveOfficerName(c) === 'Unassigned' && (
+                      <option value="Unassigned">Unassigned (Pending Allocation)</option>
+                    )}
                     {OFFICERS.map((off) => (
                       <option key={off} value={off}>
-                        {off} {off === c.officer ? '(Current)' : ''}
+                        {off} {off === resolveOfficerName(c) ? '(Current)' : ''}
                       </option>
                     ))}
                   </select>
@@ -2253,13 +2368,16 @@ export function DetailsPage({
                   {assignCheck.allowed ? (
                     <>
                       <select
-                        value={c.officer}
+                        value={resolveOfficerName(c)}
                         onChange={(e) => handleOfficerSelectChange(e.target.value)}
                         className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs font-medium text-slate-800 focus:border-navy-600 focus:outline-none"
                       >
+                        {resolveOfficerName(c) === 'Unassigned' && (
+                          <option value="Unassigned">Unassigned (Pending Allocation)</option>
+                        )}
                         {getOfficersForBureau(c.bureau).map((off) => (
                           <option key={off} value={off}>
-                            {off} {off === c.officer ? '(Current)' : ''}
+                            {off} {off === resolveOfficerName(c) ? '(Current)' : ''}
                           </option>
                         ))}
                       </select>
@@ -2455,7 +2573,7 @@ export function DetailsPage({
           <form onSubmit={handleConfirmAssignSubmit} className="space-y-4 text-xs">
             <p className="text-slate-600">
               You are reassigning investigating responsibility for docket <strong>{c.id}</strong> from{' '}
-              <span className="font-bold text-slate-900">{c.officer}</span> to{' '}
+              <span className="font-bold text-slate-900">{resolveOfficerName(c)}</span> to{' '}
               <span className="font-bold text-teal-800">{pendingOfficer}</span> within{' '}
               <strong>{c.bureau} Bureau</strong>.
             </p>
@@ -2638,7 +2756,7 @@ export function DetailsPage({
                   className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-navy-600 focus:outline-none"
                 >
                   {getOfficersForBureau(c.bureau)
-                    .filter((o) => o !== c.officer)
+                    .filter((o) => o !== resolveOfficerName(c))
                     .map((off) => (
                       <option key={off} value={off}>
                         {off}
@@ -3001,15 +3119,57 @@ export function DetailsPage({
       {statusRemarkModal && (
         <Modal
           open={!!statusRemarkModal}
-          onClose={() => setStatusRemarkModal(null)}
-          title={`Confirm Status Transition to "${statusRemarkModal}"`}
+          onClose={() => {
+            setStatusRemarkModal(null)
+            setStatusRemarkText('')
+            setStatusOverrideReason('')
+            setStatusError(null)
+          }}
+          title={
+            isAdminOverride
+              ? `System Admin Override: Set Status to "${statusRemarkModal}"`
+              : `Confirm Status Transition to "${statusRemarkModal}"`
+          }
         >
           <div className="space-y-4 text-xs">
+            {statusError && (
+              <div className="rounded-lg bg-rose-50 p-2.5 text-xs text-rose-800 border border-rose-200 flex items-start gap-1.5">
+                <AlertTriangle size={14} className="shrink-0 mt-0.5 text-rose-600" />
+                <div>
+                  <span className="font-bold">Status Update Failed:</span> {statusError}
+                </div>
+              </div>
+            )}
+
             <p className="text-slate-600">
-              You are advancing case <strong>{c.id}</strong> from{' '}
+              You are {isAdminOverride ? 'overriding' : 'advancing'} case <strong>{c.id}</strong> from{' '}
               <span className="font-bold text-slate-900">{c.status}</span> to{' '}
               <span className="font-bold text-teal-800">{statusRemarkModal}</span>.
             </p>
+
+            {isAdminOverride && (
+              <div className="rounded-lg bg-amber-50 p-2.5 text-[11px] text-amber-900 border border-amber-200 leading-relaxed">
+                <strong>System Admin Override Required:</strong> Transitioning from{' '}
+                <strong>{c.status}</strong> to <strong>{statusRemarkModal}</strong> bypasses standard workflow rules.
+                An explicit, non-empty override reason is mandatory and will be recorded permanently in the case timeline.
+              </div>
+            )}
+
+            {isAdminOverride && (
+              <div>
+                <label className="block font-semibold text-amber-900 mb-1">
+                  Statutory Override Reason * (Mandatory for System Admin):
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  value={statusOverrideReason}
+                  onChange={(e) => setStatusOverrideReason(e.target.value)}
+                  placeholder="e.g. Authorized reopening under High Court directive WP-412/2026..."
+                  className="w-full rounded-lg border border-amber-300 bg-amber-50/20 p-2 text-xs focus:border-navy-600 focus:outline-none"
+                />
+              </div>
+            )}
 
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
@@ -3029,13 +3189,23 @@ export function DetailsPage({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setStatusRemarkModal(null)}
+                onClick={() => {
+                  setStatusRemarkModal(null)
+                  setStatusRemarkText('')
+                  setStatusOverrideReason('')
+                }}
               >
                 Cancel
               </Button>
-              <Button type="button" variant="teal" size="sm" onClick={handleConfirmStatusChange}>
+              <Button
+                type="button"
+                variant={isAdminOverride ? 'primary' : 'teal'}
+                size="sm"
+                onClick={handleConfirmStatusChange}
+                disabled={isAdminOverride && !statusOverrideReason.trim()}
+              >
                 <CheckCircle2 size={13} />
-                <span>Confirm Transition</span>
+                <span>{isAdminOverride ? 'Execute Admin Override' : 'Confirm Transition'}</span>
               </Button>
             </div>
           </div>

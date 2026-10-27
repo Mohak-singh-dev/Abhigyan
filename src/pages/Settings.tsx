@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   AlertCircle,
   Bell,
   CheckCircle2,
   Database,
   Globe,
+  Loader2,
   Lock,
   RotateCcw,
   Save,
@@ -20,10 +21,19 @@ import { Badge, Button, Card, CardHeader, PageTitle } from '../components/ui'
 interface SettingsProps {
   currentRole?: Role
   currentUser?: UserProfile
+  settings?: AppSettings
+  onUpdateSettings?: (settings: Partial<AppSettings>) => Promise<boolean | AppSettings>
+  onResetSettings?: () => Promise<boolean | AppSettings>
 }
 
-export default function Settings({ currentRole = 'Admin', currentUser }: SettingsProps) {
-  const [initialSettings] = useState<AppSettings>(() => getAppSettings())
+export default function Settings({
+  currentRole = 'Admin',
+  currentUser,
+  settings: propSettings,
+  onUpdateSettings,
+  onResetSettings,
+}: SettingsProps) {
+  const [initialSettings] = useState<AppSettings>(() => propSettings || getAppSettings())
   const [similarityThreshold, setSimilarityThreshold] = useState(initialSettings.similarityThreshold)
   const [slaCritical, setSlaCritical] = useState(initialSettings.slaCritical)
   const [slaHigh, setSlaHigh] = useState(initialSettings.slaHigh)
@@ -32,13 +42,28 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
   const [emailAlerts, setEmailAlerts] = useState(initialSettings.emailAlerts)
   const [savedBanner, setSavedBanner] = useState<string | null>(null)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
-  const handleSave = (e: React.FormEvent) => {
+  // Sync state if propSettings changes from server
+  useEffect(() => {
+    if (propSettings) {
+      setSimilarityThreshold(propSettings.similarityThreshold)
+      setSlaCritical(propSettings.slaCritical)
+      setSlaHigh(propSettings.slaHigh)
+      setSlaMedium(propSettings.slaMedium)
+      setAutoEscalate(propSettings.autoEscalate)
+      setEmailAlerts(propSettings.emailAlerts)
+    }
+  }, [propSettings])
+
+  const isAuthorized = currentRole === 'Admin' && (!currentUser?.bureau || currentUser.bureau === 'All')
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorBanner(null)
     setSavedBanner(null)
 
-    if (currentRole !== 'Admin') {
+    if (!isAuthorized) {
       setErrorBanner('Unauthorized: System and SLA configuration can only be modified by a System Administrator.')
       return
     }
@@ -85,6 +110,28 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
       updatedBy: currentUser?.name || 'System Admin',
     }
 
+    if (onUpdateSettings) {
+      setIsSaving(true)
+      try {
+        const res = await onUpdateSettings(updatedSettings)
+        if (!res) {
+          setErrorBanner('Save failed: Server rejected configuration update. Verify your System Admin credentials.')
+          setIsSaving(false)
+          return
+        }
+        setSavedBanner(
+          `Configuration successfully persisted to backend database. Configured SLA windows (Critical: ${slaCritical}d, High: ${slaHigh}d, Medium: ${slaMedium}d) and overlap threshold (${similarityThreshold}%) are now active across the system.`
+        )
+        setTimeout(() => setSavedBanner(null), 7000)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Server Error: Unable to save configuration.'
+        setErrorBanner(msg)
+      } finally {
+        setIsSaving(false)
+      }
+      return
+    }
+
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updatedSettings))
       setSavedBanner(
@@ -92,14 +139,40 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
       )
       setTimeout(() => setSavedBanner(null), 7000)
     } catch {
-      setErrorBanner('Storage Error: Unable to save preferences to browser localStorage.')
+      setErrorBanner('Storage Error: Unable to save preferences.')
     }
   }
 
-  const handleResetDefaults = () => {
+  const handleResetDefaults = async () => {
     setErrorBanner(null)
-    if (currentRole !== 'Admin') {
-      setErrorBanner('Unauthorized: System configuration can only be modified by a System Administrator.')
+    setSavedBanner(null)
+    if (!isAuthorized) {
+      setErrorBanner('Unauthorized: System configuration can only be reset by a System Administrator.')
+      return
+    }
+
+    if (onResetSettings) {
+      setIsSaving(true)
+      try {
+        const res = await onResetSettings()
+        if (res) {
+          setSimilarityThreshold(DEFAULT_SETTINGS.similarityThreshold)
+          setSlaCritical(DEFAULT_SETTINGS.slaCritical)
+          setSlaHigh(DEFAULT_SETTINGS.slaHigh)
+          setSlaMedium(DEFAULT_SETTINGS.slaMedium)
+          setAutoEscalate(DEFAULT_SETTINGS.autoEscalate)
+          setEmailAlerts(DEFAULT_SETTINGS.emailAlerts)
+          setSavedBanner('Configuration successfully reset to demonstration default parameters on backend.')
+          setTimeout(() => setSavedBanner(null), 5000)
+        } else {
+          setErrorBanner('Reset failed: Server rejected settings reset.')
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Server Error: Unable to reset configuration.'
+        setErrorBanner(msg)
+      } finally {
+        setIsSaving(false)
+      }
       return
     }
 
@@ -125,6 +198,15 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
         title="System &amp; Bureau Settings"
         sub="Configure cross-bureau overlap detection thresholds, statutory SLA rules, and alert mechanisms"
       />
+
+      {!isAuthorized && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold text-amber-800 shadow-2xs">
+          <Lock size={16} className="text-amber-600 shrink-0" />
+          <span>
+            Read-Only Mode: You are viewing settings as <strong>{currentRole}</strong> ({currentUser?.bureau || 'Bureau'}). Only System Administrators (Executive Office / All Bureaus) hold authority to modify global Bureau SLA windows and overlap similarity thresholds.
+          </span>
+        </div>
+      )}
 
       {errorBanner && (
         <div className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs font-semibold text-rose-800 shadow-2xs">
@@ -180,8 +262,9 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
                 min="50"
                 max="95"
                 value={similarityThreshold}
+                disabled={!isAuthorized || isSaving}
                 onChange={(e) => setSimilarityThreshold(Number(e.target.value))}
-                className="w-full accent-navy-800 mt-2"
+                className="w-full accent-navy-800 mt-2 disabled:opacity-50"
               />
               <div className="flex justify-between text-[11px] text-slate-400 mt-1">
                 <span>50% (Permissive / Higher recall)</span>
@@ -196,7 +279,7 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
               and keyword overlap, Abhigyan flags an overlap alert in both the <strong>Regulation Bureau (RB)</strong>{' '}
               and <strong>Public Grievance Redressal Cell (PGRC)</strong> dockets.{' '}
               <span className="text-slate-400 italic">
-                This threshold applies to demonstration data only and does not represent a verified AICTE policy.
+                Unreviewed candidate pairs below this threshold are suppressed from active alert queues, while all historical review decisions remain intact.
               </span>
             </div>
           </div>
@@ -205,9 +288,9 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
         {/* SLA Window Configuration */}
         <Card>
           <CardHeader
-            title="Statutory Redressal SLA Windows (Configurable Demo Parameters)"
-            sub="Configurable business day windows stored in abhigyan_settings. New complaint filings calculate statutory SLA due dates from these values without altering existing case records."
-            action={<Badge v="Configurable" />}
+            title="Statutory Redressal SLA Windows (Authoritative Database Configuration)"
+            sub="Configurable business day windows stored in backend system settings. New complaint filings calculate statutory SLA due dates from these values without altering existing case records."
+            action={<Badge v="Database-Backed" />}
           />
 
           <div className="grid gap-4 sm:grid-cols-3">
@@ -218,10 +301,11 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
               <input
                 type="number"
                 min="1"
-                max="10"
+                max="30"
                 value={slaCritical}
+                disabled={!isAuthorized || isSaving}
                 onChange={(e) => setSlaCritical(Number(e.target.value))}
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-navy-600 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-navy-600 focus:outline-none disabled:bg-slate-100 disabled:opacity-60"
               />
               <p className="mt-1 text-[10px] text-slate-400">Hostel hazard, ragging, unapproved courses</p>
             </div>
@@ -232,11 +316,12 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
               </label>
               <input
                 type="number"
-                min="3"
-                max="20"
+                min="2"
+                max="60"
                 value={slaHigh}
+                disabled={!isAuthorized || isSaving}
                 onChange={(e) => setSlaHigh(Number(e.target.value))}
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-navy-600 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-navy-600 focus:outline-none disabled:bg-slate-100 disabled:opacity-60"
               />
               <p className="mt-1 text-[10px] text-slate-400">Excess fee collections, admission bypass</p>
             </div>
@@ -247,11 +332,12 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
               </label>
               <input
                 type="number"
-                min="5"
-                max="45"
+                min="3"
+                max="90"
                 value={slaMedium}
+                disabled={!isAuthorized || isSaving}
                 onChange={(e) => setSlaMedium(Number(e.target.value))}
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-navy-600 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:border-navy-600 focus:outline-none disabled:bg-slate-100 disabled:opacity-60"
               />
               <p className="mt-1 text-[10px] text-slate-400">Equipment deficiency, syllabus dispute</p>
             </div>
@@ -263,9 +349,17 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
           <CardHeader
             title="Automated Surveillance &amp; Bureau Notification Rules"
             sub="Automatic escalation triggers upon statutory deadline breach"
+            action={<Badge v="Demo Simulation" />}
           />
 
           <div className="space-y-4 text-xs">
+            <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 border border-amber-200 leading-relaxed flex items-start gap-2">
+              <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                <strong>Unconfigured Background Services:</strong> External SMTP email delivery and background cron daemon workers for automatic SLA escalation are not active in this deployment. Toggling these options records policy preferences in the database but will not dispatch live emails or auto-escalate records without external service orchestration.
+              </span>
+            </div>
+
             <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100">
               <div>
                 <h4 className="font-bold text-slate-900">Automatic Bureau Head Escalation</h4>
@@ -276,8 +370,9 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
               <input
                 type="checkbox"
                 checked={autoEscalate}
+                disabled={!isAuthorized || isSaving}
                 onChange={(e) => setAutoEscalate(e.target.checked)}
-                className="h-4 w-4 rounded accent-navy-800"
+                className="h-4 w-4 rounded accent-navy-800 disabled:opacity-50"
               />
             </div>
 
@@ -291,8 +386,9 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
               <input
                 type="checkbox"
                 checked={emailAlerts}
+                disabled={!isAuthorized || isSaving}
                 onChange={(e) => setEmailAlerts(e.target.checked)}
-                className="h-4 w-4 rounded accent-navy-800"
+                className="h-4 w-4 rounded accent-navy-800 disabled:opacity-50"
               />
             </div>
           </div>
@@ -305,9 +401,9 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
             variant="outline"
             size="md"
             onClick={handleResetDefaults}
-            disabled={currentRole !== 'Admin'}
+            disabled={!isAuthorized || isSaving}
           >
-            <RotateCcw size={15} />
+            {isSaving ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
             <span>Reset Demo Defaults</span>
           </Button>
 
@@ -315,9 +411,9 @@ export default function Settings({ currentRole = 'Admin', currentUser }: Setting
             type="submit"
             variant="primary"
             size="md"
-            disabled={currentRole !== 'Admin'}
+            disabled={!isAuthorized || isSaving}
           >
-            <Save size={15} />
+            {isSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
             <span>Save Configuration Preferences</span>
           </Button>
         </div>
