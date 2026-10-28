@@ -1,9 +1,12 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.database import get_db
 
 router = APIRouter(prefix="", tags=["Health"])
+logger = logging.getLogger(__name__)
 
 @router.get("/health")
 def check_health(db: Session = Depends(get_db)):
@@ -21,8 +24,11 @@ def check_health(db: Session = Depends(get_db)):
             "service": "Abhigyan Complaint Monitoring API",
             "phase": "Phase 1: Foundations"
         }
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("Health check database query failed")
         raise HTTPException(
             status_code=503,
-            detail=f"Database connection error: {str(e)}"
+            detail="Database connection error"
         )

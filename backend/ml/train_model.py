@@ -51,8 +51,8 @@ def preprocess_text(text: str) -> str:
     return " ".join(text.strip().split())
 
 def train_and_evaluate(
-    data_path: str = "backend/ml/training_data.csv",
-    output_dir: str = "backend/ml/artifacts"
+    data_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "training_data.csv"),
+    output_dir: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 ):
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"Training data not found at {data_path}")

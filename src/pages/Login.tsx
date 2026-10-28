@@ -36,9 +36,10 @@ interface DemoRoleConfig {
   accent: string
 }
 
-const IS_DEMO_AUTH_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.VITE_DEMO_AUTH === 'true')
+const IS_DEMO_AUTH_ENABLED = Boolean(import.meta.env.DEV)
+const DEMO_PASSWORD = import.meta.env.DEV ? 'AicteDemo@2026' : ''
 
-const DEMO_ROLES: DemoRoleConfig[] = [
+const DEMO_ROLES: DemoRoleConfig[] = import.meta.env.DEV ? [
   {
     role: 'Complainant',
     label: 'Citizen / Student',
@@ -89,13 +90,19 @@ const DEMO_ROLES: DemoRoleConfig[] = [
     icon: Shield,
     accent: 'border-navy-800 bg-navy-50/70 text-navy-900',
   },
-]
+] : []
+
+const ROLE_TITLES: Record<Role, string> = {
+  Complainant: 'Complainant',
+  Officer: 'Handling Officer',
+  BureauAdmin: 'Bureau Admin',
+  Admin: 'System Admin',
+}
 
 export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
-  const defaultRoleConfig = DEMO_ROLES.find((r) => r.role === initialRole) || DEMO_ROLES[4]
   const [selectedRole, setSelectedRole] = useState<Role>(initialRole)
-  const [email, setEmail] = useState(defaultRoleConfig.email)
-  const [password, setPassword] = useState('AicteDemo@2026')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -150,7 +157,7 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
   const handleSelectRole = (r: DemoRoleConfig) => {
     setSelectedRole(r.role)
     setEmail(r.email)
-    setPassword('AicteDemo@2026')
+    setPassword(DEMO_PASSWORD)
     setErrorMessage(null)
   }
 
@@ -178,7 +185,7 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
   const handleQuickLogin = async (r: DemoRoleConfig) => {
     setSelectedRole(r.role)
     setEmail(r.email)
-    setPassword('AicteDemo@2026')
+    setPassword(DEMO_PASSWORD)
     setIsLoading(true)
     setErrorMessage(null)
 
@@ -189,7 +196,7 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
     } catch {
       // Fallback to standard login
       try {
-        const res = await loginApi({ email: r.email, password: 'AicteDemo@2026' })
+        const res = await loginApi({ email: r.email, password: DEMO_PASSWORD })
         onLogin(res.user, res.accessToken)
       } catch (err: unknown) {
         const msg =
@@ -203,10 +210,11 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
     }
   }
 
-  const activeRoleConfig =
-    DEMO_ROLES.find((r) => r.email.toLowerCase() === email.trim().toLowerCase()) ||
-    DEMO_ROLES.find((r) => r.role === selectedRole) ||
-    DEMO_ROLES[4]
+  const activeRoleConfig = import.meta.env.DEV
+    ? DEMO_ROLES.find((r) => r.email.toLowerCase() === email.trim().toLowerCase()) ||
+      DEMO_ROLES.find((r) => r.role === selectedRole) ||
+      { title: ROLE_TITLES[selectedRole], label: 'Account Login' }
+    : { title: ROLE_TITLES[selectedRole], label: 'Account Login' }
 
   return (
     <div className="grid min-h-screen lg:grid-cols-12 bg-slate-100 font-sans">
@@ -347,8 +355,8 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
             </div>
           )}
 
-          {/* Step 1: Select Demo Role Cards */}
-          <div>
+          {/* Demo role shortcuts are compiled into development builds only. */}
+          {IS_DEMO_AUTH_ENABLED && <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                 Step 1: Choose Role Perspective
@@ -396,7 +404,7 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
                 )
               })}
             </div>
-          </div>
+          </div>}
 
           {/* Step 2: Form & Sign In */}
           <form
@@ -466,7 +474,7 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
                 <p className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1.5">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0"></span>
                   <span>
-                    Demo seed accounts password: <span className="font-mono font-medium text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">AicteDemo@2026</span>
+                    Demo seed accounts password: <span className="font-mono font-medium text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">{DEMO_PASSWORD}</span>
                   </span>
                 </p>
               )}
@@ -572,7 +580,7 @@ export default function Login({ onLogin, initialRole = 'Admin' }: LoginProps) {
                       disabled={isLoading}
                       onChange={(e) => setRegName(e.target.value)}
                       required
-                      placeholder="e.g. Rohit Sharma"
+                        placeholder="Your full name"
                       className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:border-navy-700 focus:ring-1 focus:ring-navy-700 focus:outline-none disabled:bg-slate-50 transition"
                     />
                     <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />

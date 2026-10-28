@@ -34,7 +34,7 @@ import {
   UserCog,
   X,
 } from 'lucide-react'
-import type { Bureau, CaseDocument, Complaint, LinkedDocket, Priority, ReassignmentRequest, Role, Status, UserProfile, AIClassificationResult } from '../types'
+import type { Bureau, CaseDocument, Complaint, Institution, LinkedDocket, Priority, ReassignmentRequest, Role, Status, UserProfile, AIClassificationResult } from '../types'
 import { classifyComplaintPreview, createComplaintApi } from '../api/complaints'
 import { getLinkedDocketsApi } from '../api/overlaps'
 import {
@@ -365,6 +365,7 @@ export function ComplaintsPage({
 
 interface SubmitComplaintProps {
   complaints: Complaint[]
+  institutionRegistry: Institution[]
   onSubmit: (newComplaint: Complaint) => Promise<Complaint | null> | void
   onCancel: () => void
   onTrackCase: (caseId: string) => void
@@ -374,6 +375,7 @@ interface SubmitComplaintProps {
 
 export function SubmitComplaint({
   complaints,
+  institutionRegistry,
   onSubmit,
   onCancel,
   onTrackCase,
@@ -381,22 +383,32 @@ export function SubmitComplaint({
   currentUser,
 }: SubmitComplaintProps) {
   // Institution selection
-  const [permanentIdInput, setPermanentIdInput] = useState(institutions[0].aicteId)
-  const [selectedInstId, setSelectedInstId] = useState(institutions[0].id)
-  const [instNameInput, setInstNameInput] = useState(institutions[0].name)
-  const [instCityInput, setInstCityInput] = useState(institutions[0].city)
-  const [instStateInput, setInstStateInput] = useState(institutions[0].state)
-  const [instTypeInput, setInstTypeInput] = useState(institutions[0].type)
+  const [permanentIdInput, setPermanentIdInput] = useState(institutionRegistry[0]?.aicteId || '')
+  const [selectedInstId, setSelectedInstId] = useState(institutionRegistry[0]?.id || '')
+  const [instNameInput, setInstNameInput] = useState(institutionRegistry[0]?.name || '')
+  const [instCityInput, setInstCityInput] = useState(institutionRegistry[0]?.city || '')
+  const [instStateInput, setInstStateInput] = useState(institutionRegistry[0]?.state || '')
+  const [instTypeInput, setInstTypeInput] = useState(institutionRegistry[0]?.type || '')
 
   // Complainant profile
   const [complainantType, setComplainantType] = useState<
     'Student' | 'Faculty' | 'Parent' | 'Whistleblower' | 'General Public'
   >(currentRole === 'Complainant' ? 'Student' : 'General Public')
-  const [complainantName, setComplainantName] = useState(currentUser?.name || 'Rohit Sharma')
-  const [complainantEmail, setComplainantEmail] = useState(
-    currentUser?.email || 'rohit.sharma@student.edu.in'
-  )
-  const [complainantPhone, setComplainantPhone] = useState(currentUser?.phone || '+91 98765 43210')
+  const [complainantName, setComplainantName] = useState(currentUser?.name || '')
+  const [complainantEmail, setComplainantEmail] = useState(currentUser?.email || '')
+  const [complainantPhone, setComplainantPhone] = useState(currentUser?.phone || '')
+
+  useEffect(() => {
+    if (institutionRegistry.length && !institutionRegistry.some((row) => row.id === selectedInstId)) {
+      const first = institutionRegistry[0]
+      setSelectedInstId(first.id)
+      setPermanentIdInput(first.aicteId)
+      setInstNameInput(first.name)
+      setInstCityInput(first.city)
+      setInstStateInput(first.state)
+      setInstTypeInput(first.type)
+    }
+  }, [institutionRegistry, selectedInstId])
 
   // Grievance particulars
   const [category, setCategory] = useState('Fee Regulation')
@@ -646,7 +658,7 @@ export function SubmitComplaint({
     let newCase: Complaint = {
       id: newCaseId,
       institutionId: selectedInstId,
-      institutionPermanentId: permanentIdInput.trim() || institutions[0].aicteId,
+      institutionPermanentId: permanentIdInput.trim() || institutionRegistry[0]?.aicteId || '',
       bureau,
       category,
       priority,
@@ -830,6 +842,16 @@ export function SubmitComplaint({
           </div>
         </Card>
       </div>
+    )
+  }
+
+  if (!institutionRegistry.length) {
+    return (
+      <Card className="max-w-2xl mx-auto p-8 text-center">
+        <h2 className="text-lg font-bold text-slate-900">Institution registry unavailable</h2>
+        <p className="mt-2 text-sm text-slate-600">The backend has no institution records yet. Contact an administrator to load the authorized registry before filing a grievance.</p>
+        <Button variant="outline" size="sm" className="mt-5" onClick={onCancel}>Return</Button>
+      </Card>
     )
   }
 

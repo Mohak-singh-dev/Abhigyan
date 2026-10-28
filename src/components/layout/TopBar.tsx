@@ -337,8 +337,8 @@ export default function TopBar({
                 </div>
 
                 <div className="p-1.5 text-xs text-slate-700 divide-y divide-slate-100">
-                  {/* Switch Role Options */}
-                  <div className="py-1">
+                  {/* Demo role switching is development-only. */}
+                  {import.meta.env.DEV && <div className="py-1">
                     <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Switch Demo Role Perspective:
                     </div>
@@ -370,7 +370,7 @@ export default function TopBar({
                         </button>
                       )
                     })}
-                  </div>
+                  </div>}
 
                   {currentRole !== 'Complainant' && (
                     <div className="py-1">

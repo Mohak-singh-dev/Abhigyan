@@ -34,6 +34,17 @@ def test_health_endpoint_success(client: TestClient):
     finally:
         app.dependency_overrides.clear()
 
+def test_cors_allows_configured_development_origin(client: TestClient):
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
 def test_health_endpoint_db_failure(client: TestClient):
     def override_db():
         yield DummyDBFailure()
@@ -44,6 +55,7 @@ def test_health_endpoint_db_failure(client: TestClient):
         response = client.get("/api/health")
         assert response.status_code == 503
         data = response.json()
-        assert "Database connection error" in data["detail"]
+        assert data["detail"] == "Database connection error"
+        assert "timeout" not in data["detail"].lower()
     finally:
         app.dependency_overrides.clear()

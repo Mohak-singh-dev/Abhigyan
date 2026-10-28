@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Landmark, Loader2, ShieldAlert } from 'lucide-react'
-import type { AppNotification, AppSettings, Bureau, CaseDocument, Complaint, Overlap, Page, Priority, ReassignmentRequest, Role, Status, UserProfile } from './types'
+import type { AppNotification, AppSettings, Bureau, CaseDocument, Complaint, Institution, Overlap, Page, Priority, ReassignmentRequest, Role, Status, UserProfile } from './types'
 import {
   canAddCaseRemarks,
   canAssignCase,
@@ -24,6 +24,8 @@ import {
   getAppSettings,
   DEFAULT_SETTINGS,
   SETTINGS_STORAGE_KEY,
+  institutions as initialInstitutions,
+  replaceInstitutions,
 } from './data'
 import {
   ApiError,
@@ -56,6 +58,7 @@ import {
   resetSettingsApi,
 } from './api/settings'
 import { fetchUsersApi } from './api/users'
+import { fetchInstitutionsApi } from './api/institutions'
 import AppLayout from './components/layout/AppLayout'
 import Dashboard from './pages/Dashboard'
 import { ComplaintsPage, DetailsPage, SubmitComplaint } from './pages/Complaints'
@@ -217,12 +220,31 @@ export default function App() {
   })
 
   const [selectedInstitutionId, setSelectedInstitutionId] = useState<string>(() => {
+    if (import.meta.env.PROD) return ''
     try {
       return localStorage.getItem('abhigyan_selected_institution_id') || 'i1'
     } catch {
       return 'i1'
     }
   })
+  const [institutionRegistry, setInstitutionRegistry] = useState<Institution[]>(() =>
+    import.meta.env.DEV ? initialInstitutions : []
+  )
+
+  const syncInstitutions = async () => {
+    try {
+      const rows = await fetchInstitutionsApi()
+      replaceInstitutions(rows)
+      setInstitutionRegistry(rows)
+      setSelectedInstitutionId((current) => rows.some((row) => row.id === current) ? current : (rows[0]?.id || ''))
+    } catch {
+      if (import.meta.env.PROD) {
+        replaceInstitutions([])
+        setInstitutionRegistry([])
+        setSelectedInstitutionId('')
+      }
+    }
+  }
 
   const handleSelectInstitution = (id: string) => {
     setSelectedInstitutionId(id)
@@ -234,6 +256,7 @@ export default function App() {
   }
 
   const [complaints, setComplaints] = useState<Complaint[]>(() => {
+    if (import.meta.env.PROD) return []
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.COMPLAINTS)
       if (stored) {
@@ -295,11 +318,11 @@ export default function App() {
         })
       }
     } catch {
-      // Offline fallback: preserve local state
+      if (import.meta.env.PROD) setComplaints([])
     }
   }
 
-  const [overlapsList, setOverlapsList] = useState<Overlap[] | undefined>(undefined)
+  const [overlapsList, setOverlapsList] = useState<Overlap[] | undefined>(import.meta.env.PROD ? [] : undefined)
 
   const syncOverlaps = async () => {
     try {
@@ -321,7 +344,7 @@ export default function App() {
         }
       }
     } catch {
-      // Offline fallback: preserve local state
+      if (import.meta.env.PROD) setOverlapsList([])
     }
   }
 
@@ -340,7 +363,7 @@ export default function App() {
         }
       }
     } catch {
-      // Offline fallback: preserve local state
+      // Keep settings available when the backend is temporarily offline in development.
     }
   }
 
@@ -358,13 +381,14 @@ export default function App() {
         }
       }
     } catch {
-      // Offline fallback: preserve local state
+      if (import.meta.env.PROD) setUsers([])
     }
   }
 
   // Fetch fresh authorized complaints, overlaps, settings & users from backend when session user changes
   useEffect(() => {
     if (isLoggedIn && getAuthToken()) {
+      syncInstitutions()
       syncComplaints()
       syncOverlaps()
       syncSettings()
@@ -375,6 +399,7 @@ export default function App() {
   }, [isLoggedIn, currentUser?.id])
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    if (import.meta.env.PROD) return []
     return loadUserNotifications(currentUser?.id)
   })
 
@@ -403,7 +428,7 @@ export default function App() {
     return DEFAULT_OVERLAP_STATES
   })
 
-  const [users, setUsers] = useState<UserProfile[]>(() => getStoredUsers())
+  const [users, setUsers] = useState<UserProfile[]>(() => import.meta.env.PROD ? [] : getStoredUsers())
 
   const handleUpdateOverlapState = async (
     id: string,
@@ -520,6 +545,7 @@ export default function App() {
 
   // Role switching authenticated via backend demo-login
   const handleSelectRole = async (newRole: Role, userId?: string) => {
+    if (import.meta.env.PROD) return
     try {
       const payload: DemoLoginPayload = userId ? { role: newRole, userId } : { role: newRole }
       const res = await demoLoginApi(payload)
@@ -1544,6 +1570,7 @@ export default function App() {
           {activePage === 'submit' && (
             <SubmitComplaint
               complaints={complaints}
+              institutionRegistry={institutionRegistry}
               onSubmit={handleAddComplaint}
               onCancel={() => setActivePage(getDefaultLandingPage(currentRole))}
               onTrackCase={handleOpenCase}
@@ -1575,6 +1602,7 @@ export default function App() {
 
           {activePage === 'institutions' && (
             <Institutions
+              institutionRegistry={institutionRegistry}
               complaints={complaints}
               onOpen={handleOpenCase}
               onStatus={handleStatusChange}

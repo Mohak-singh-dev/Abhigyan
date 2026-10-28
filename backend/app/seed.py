@@ -496,6 +496,10 @@ DEMO_COMPLAINTS = [
 ]
 
 def seed_demo_data(db: Session) -> None:
+    if settings.ENVIRONMENT.lower() == "production":
+        raise RuntimeError("Demo seeding is disabled in production.")
+    if not settings.DEFAULT_SEED_PASSWORD:
+        raise RuntimeError("Set DEFAULT_SEED_PASSWORD before running the local demo seed script.")
     logger.info("Starting idempotent seeding for Abhigyan Phase 1 & 2A...")
 
     # 1. Seed Institutions

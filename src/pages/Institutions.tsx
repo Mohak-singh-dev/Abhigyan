@@ -26,11 +26,12 @@ import {
   User,
   Users,
 } from 'lucide-react'
-import type { Complaint, Role, Status, UserProfile } from '../types'
-import { BUREAU_INFO, institutions, isOverdue, resolveOfficerName } from '../data'
+import type { Complaint, Institution, Role, Status, UserProfile } from '../types'
+import { BUREAU_INFO, institutions as defaultInstitutions, isOverdue, resolveOfficerName } from '../data'
 import { Badge, Button, Card, CardHeader, PageTitle, SearchBox } from '../components/ui'
 
 interface InstitutionsProps {
+  institutionRegistry: Institution[]
   complaints: Complaint[]
   onOpen: (id: string) => void
   onStatus?: (id: string, s: Status, note?: string) => void
@@ -44,6 +45,7 @@ interface InstitutionsProps {
 const STORAGE_KEY = 'abhigyan_selected_institution_id'
 
 export default function Institutions({
+  institutionRegistry,
   complaints,
   onOpen,
   onStatus,
@@ -53,6 +55,7 @@ export default function Institutions({
   onSelectInstitution,
   onNavigateToOverlaps,
 }: InstitutionsProps) {
+  const institutions = institutionRegistry.length ? institutionRegistry : defaultInstitutions
   // Directory Search & Filters
   const [searchQuery, setSearchQuery] = useState('')
   const [stateFilter, setStateFilter] = useState('All')
@@ -74,16 +77,19 @@ export default function Institutions({
     } catch {
       // fallback
     }
-    return institutions[0].id
+    return institutions[0]?.id || ''
   })
 
   // Sync prop changes
   useEffect(() => {
-    if (propSelectedId && institutions.some((i) => i.id === propSelectedId)) {
-      setSelectedInstId(propSelectedId)
+    const nextId = propSelectedId && institutions.some((i) => i.id === propSelectedId)
+      ? propSelectedId
+      : institutions[0]?.id
+    if (nextId) {
+      setSelectedInstId(nextId)
       setViewMode('profile')
     }
-  }, [propSelectedId])
+  }, [propSelectedId, institutionRegistry])
 
   // Save selection
   const handleSelect = (id: string) => {
@@ -104,6 +110,7 @@ export default function Institutions({
 
   // Complaints linked to current institution across all bureaus
   const instComplaints = useMemo(() => {
+    if (!currentInst) return []
     return complaints.filter(
       (c) =>
         c.institutionId === currentInst.id ||
@@ -250,6 +257,15 @@ export default function Institutions({
       return matchesSearch && matchesState && matchesType && matchesDual
     })
   }, [directoryItems, searchQuery, stateFilter, typeFilter, dualExposureFilter])
+
+  if (!currentInst) {
+    return (
+      <Card className="max-w-2xl mx-auto p-8 text-center">
+        <h2 className="text-lg font-bold text-slate-900">Institution registry unavailable</h2>
+        <p className="mt-2 text-sm text-slate-600">The backend has no institution records yet. Load an authorized registry to use institution profiles and grievance intake.</p>
+      </Card>
+    )
+  }
 
   return (
     <div className="space-y-6">

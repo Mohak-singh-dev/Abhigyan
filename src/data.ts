@@ -10,9 +10,12 @@ import type {
   UserProfile,
 } from './types'
 
+const IS_DEV = import.meta.env?.DEV ?? true
+const IS_PROD = import.meta.env?.PROD ?? false
+
 export const TODAY = '2026-10-25'
-export const OFFICERS = ['Anita Verma', 'Rajesh Kumar', 'Meera Iyer', 'Suresh Patel', 'Dr. Arun Sharma']
-export const CURRENT_OFFICER = 'Rajesh Kumar'
+export const OFFICERS = IS_DEV ? ['Anita Verma', 'Rajesh Kumar', 'Meera Iyer', 'Suresh Patel', 'Dr. Arun Sharma'] : []
+export const CURRENT_OFFICER = IS_DEV ? 'Rajesh Kumar' : ''
 export const STATUSES: Status[] = ['Pending', 'In Progress', 'Escalated', 'Resolved']
 export const BUREAUS: Bureau[] = ['RB', 'PGRC', 'Approval', 'Academic', 'SB', 'EO']
 
@@ -49,7 +52,7 @@ export const BUREAU_INFO: Record<Bureau, { name: string; desc: string; badgeClas
   },
 }
 
-export const institutions: Institution[] = [
+export let institutions: Institution[] = IS_DEV ? [
   {
     id: 'i1',
     name: 'Sunrise Institute of Technology',
@@ -148,7 +151,11 @@ export const institutions: Institution[] = [
     activeComplaints: 1,
     riskLevel: 'Low',
   },
-]
+] : []
+
+export function replaceInstitutions(rows: Institution[]): void {
+  institutions = rows
+}
 
 const addDays = (d: string, n: number) => {
   const x = new Date(d)
@@ -424,7 +431,7 @@ const getSampleDocuments = (id: string, complainantType: string, officer: string
   },
 ]
 
-export const initialComplaints: Complaint[] = rawRows.map(
+export const initialComplaints: Complaint[] = IS_DEV ? rawRows.map(
   ([id, institutionId, bureau, category, priority, officer, status, date, due, title, description, complainantType]) => {
     const timeline: import('./types').TimelineEvent[] = [
       { label: 'Complaint registered and verified on AICTE portal', date, by: 'System / Portal', role: 'Complainant' },
@@ -517,7 +524,7 @@ export const initialComplaints: Complaint[] = rawRows.map(
       lastActionDate: timeline[timeline.length - 1]?.date || date,
     }
   }
-)
+) : []
 
 export type OverlapReviewState = 'linked' | 'dismissed' | 'deferred'
 
@@ -562,7 +569,7 @@ export function isOverlapActivePending(
   return effective === 'open' && overlap.similarity >= threshold
 }
 
-export const overlaps: Overlap[] = [
+export const overlaps: Overlap[] = IS_DEV ? [
   {
     id: 'o1',
     a: 'RB-2026-0141',
@@ -659,9 +666,9 @@ export const overlaps: Overlap[] = [
     status: 'dismissed',
     notes: 'Independent incidents with unrelated fact patterns. Kept strictly separate.',
   },
-]
+] : []
 
-export const initialNotifications: AppNotification[] = [
+export const initialNotifications: AppNotification[] = IS_DEV ? [
   {
     id: 'notif-1',
     type: 'alert',
@@ -707,9 +714,9 @@ export const initialNotifications: AppNotification[] = [
     timestamp: '2026-10-21 09:00',
     read: true,
   },
-]
+] : []
 
-export const userProfiles: UserProfile[] = [
+export const userProfiles: UserProfile[] = IS_DEV ? [
   {
     id: 'u0',
     name: 'Rohit Sharma',
@@ -810,7 +817,7 @@ export const userProfiles: UserProfile[] = [
     activeCasesCount: 1,
     status: 'Active',
   },
-]
+] : []
 
 // Helper functions
 export const fmt = (d: string) => {
@@ -1347,6 +1354,7 @@ export const getNotificationStorageKey = (userId?: string): string => {
 }
 
 export const loadUserNotifications = (userId?: string): AppNotification[] => {
+  if (IS_PROD) return []
   if (!userId) return initialNotifications
   try {
     const key = getNotificationStorageKey(userId)

@@ -7,12 +7,10 @@ export const AUTH_TOKEN_KEY = 'abhigyan_token'
 export const AUTH_USER_KEY = 'abhigyan_current_user'
 export const UNAUTHORIZED_EVENT = 'abhigyan:unauthorized'
 
-const rawApiUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
-  ? (import.meta.env.VITE_API_URL as string)
-  : undefined
-export const API_BASE_URL = rawApiUrl
-  ? rawApiUrl.replace(/\/$/, '')
-  : 'http://localhost:8000/api'
+import { resolveApiBaseUrl } from './configuration.mjs'
+
+const rawApiUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_API_URL : undefined
+export const API_BASE_URL = resolveApiBaseUrl(rawApiUrl, import.meta.env?.PROD ?? false)
 
 export class ApiError extends Error {
   public status: number
@@ -119,6 +117,9 @@ function extractErrorMessage(status: number, data: unknown): string {
  * Core API request method supporting automatic JWT attachment and error parsing.
  */
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  if (!API_BASE_URL) {
+    throw new ApiError('Backend API is not configured. Set VITE_API_URL to the deployed API base URL.', 0)
+  }
   const isAbsolute = endpoint.startsWith('http://') || endpoint.startsWith('https://')
   const url = isAbsolute
     ? endpoint

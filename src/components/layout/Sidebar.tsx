@@ -281,7 +281,7 @@ export default function Sidebar({
       {/* Role Switcher & Collapse Toggle Footer */}
       <div className="border-t border-white/10 p-3 space-y-2 relative">
         {/* Role Switcher Popover */}
-        {showRoleMenu && !collapsed && (
+        {import.meta.env.DEV && showRoleMenu && !collapsed && (
           <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl bg-slate-900 border border-white/15 p-2 shadow-xl z-50 text-xs">
             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Switch Demo Role
@@ -334,7 +334,7 @@ export default function Sidebar({
                   </div>
                 </div>
               </div>
-              <button
+              {import.meta.env.DEV && <button
                 type="button"
                 onClick={() => setShowRoleMenu(!showRoleMenu)}
                 title="Switch demo perspective"
@@ -342,7 +342,7 @@ export default function Sidebar({
               >
                 <span>Role</span>
                 <ChevronDown size={11} />
-              </button>
+              </button>}
             </div>
 
             {onSignOut && (
