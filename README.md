@@ -45,7 +45,7 @@ The Blueprint selects Render's always-on `starter` plan; this avoids free-tier s
 ### 3. Deploy the frontend on Vercel
 
 1. Import the repository as a Vercel project with the repository root as the project root.
-2. Use the Vite defaults or these settings: build command `npm run build`; output directory `dist`; install command `npm install` (or Vercel's lockfile detection).
+2. Use the Vite defaults or these settings: install command `npm ci --include=dev`; build command `npm run build`; output directory `dist`. The install command is also set in `vercel.json` so TypeScript and Vite dev dependencies are present during deployment.
 3. Set `VITE_API_URL` in Vercel Production and Preview environments to the backend origin plus `/api`, for example `https://your-render-service.onrender.com/api`. This URL is public configuration, not a secret. The production build fails if it is missing, non-HTTPS, or points at localhost.
 4. Deploy the frontend. Add its exact deployed origin (scheme and host, without a path) to Render's `CORS_ORIGINS`, then redeploy the API. For a custom frontend domain, include that exact origin too. Do not use `*.vercel.app` or `*` with credentialed CORS.
 
