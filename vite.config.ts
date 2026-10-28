@@ -3,11 +3,14 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
-  if (mode === 'production' && !env.VITE_API_URL?.trim()) {
-    throw new Error('VITE_API_URL must be set to the deployed HTTPS API base URL before building for production.')
-  }
-  if (mode === 'production') {
-    const apiUrl = new URL(env.VITE_API_URL)
+  const configuredApiUrl = env.VITE_API_URL?.trim()
+  if (mode === 'production' && configuredApiUrl) {
+    let apiUrl: URL
+    try {
+      apiUrl = new URL(configuredApiUrl)
+    } catch {
+      throw new Error('Production VITE_API_URL must be an absolute HTTPS API URL ending in /api.')
+    }
     if (
       apiUrl.protocol !== 'https:' ||
       /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/i.test(apiUrl.hostname) ||

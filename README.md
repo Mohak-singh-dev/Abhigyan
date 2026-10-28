@@ -20,9 +20,16 @@ Abhigyan is a React, TypeScript, and Vite dashboard backed by a FastAPI REST API
 
 The transaction pooler is intended for serverless and edge functions, uses port `6543`, and does not support prepared statements. This project does not use that mode. If the architecture changes to serverless, use the transaction-pooler URL, limit each SQLAlchemy process to one pooled connection, keep SSL required, and verify warm-instance connection health. The current `psycopg2` driver does not automatically prepare statements; if migrating to Psycopg 3, use `postgresql+psycopg://` with SQLAlchemy `connect_args={"prepare_threshold": None}` for transaction pooling. Keep migrations on a direct or session connection.
 
-### 2. Deploy the API on Render
+### 2. Deploy the frontend first on Vercel
 
-1. Push this repository to a Git provider accessible to Render, then create a Render Blueprint from the repository using `render.yaml` (or create a Python Web Service manually with root directory `backend`).
+1. Import the repository as a Vercel project with the repository root as the project root.
+2. Use install command `npm ci --include=dev`, build command `npm run build`, and output directory `dist`. These settings are also in `vercel.json`.
+3. For this first frontend-only deployment, leave `VITE_API_URL` unset. Production builds then contain no localhost API fallback, and API actions show a configuration error until the backend is deployed. The visual frontend can be published now, but sign-in, registration, and data-backed features will not work yet.
+4. Deploy and copy the resulting Vercel production origin (scheme and host, without a path). You will need that exact origin for backend CORS.
+
+### 3. Deploy the API on Render
+
+1. Create a Render Blueprint from the repository using `render.yaml` (or create a Python Web Service manually with root directory `backend`).
 2. The Blueprint uses Python 3.11.11, installs `backend/requirements.txt`, trains ML artifacts from the checked-in synthetic dataset during build, starts Uvicorn on Render's `$PORT`, and checks `/api/health`.
 3. Set the Blueprint's prompted environment variables in Render:
 
@@ -30,7 +37,7 @@ The transaction pooler is intended for serverless and edge functions, uses port 
    | --- | --- |
    | `DATABASE_URL` | Supabase direct or session-pooler URL as above |
    | `JWT_SECRET_KEY` | Unique cryptographically random value, at least 32 characters |
-   | `CORS_ORIGINS` | Exact production Vercel origin, e.g. `https://your-project.vercel.app`; no wildcard |
+   | `CORS_ORIGINS` | Exact Vercel origin copied after frontend deploy, e.g. `https://your-project.vercel.app`; no wildcard |
    | `ENVIRONMENT` | `production` (set in Blueprint) |
    | `DEMO_AUTH_ENABLED` | `false` (set in Blueprint) |
    | `API_PREFIX` | `/api` (set in Blueprint) |
@@ -42,12 +49,9 @@ The transaction pooler is intended for serverless and edge functions, uses port 
 
 The Blueprint selects Render's always-on `starter` plan; this avoids free-tier sleep and requires an active paid Render account. No deployment or database migration has been performed by this repository change.
 
-### 3. Deploy the frontend on Vercel
+### 4. Connect the deployed frontend and backend
 
-1. Import the repository as a Vercel project with the repository root as the project root.
-2. Use the Vite defaults or these settings: install command `npm ci --include=dev`; build command `npm run build`; output directory `dist`. The install command is also set in `vercel.json` so TypeScript and Vite dev dependencies are present during deployment.
-3. Set `VITE_API_URL` in Vercel Production and Preview environments to the backend origin plus `/api`, for example `https://your-render-service.onrender.com/api`. This URL is public configuration, not a secret. The production build fails if it is missing, non-HTTPS, or points at localhost.
-4. Deploy the frontend. Add its exact deployed origin (scheme and host, without a path) to Render's `CORS_ORIGINS`, then redeploy the API. For a custom frontend domain, include that exact origin too. Do not use `*.vercel.app` or `*` with credentialed CORS.
+After Render provides the backend URL, add `VITE_API_URL` to the Vercel Production environment with the backend origin plus `/api`, for example `https://your-render-service.onrender.com/api`. This is public configuration, not a secret. Redeploy Vercel to enable the API-backed features. If you deploy previews, configure the variable there as well, and add each exact preview origin to backend CORS as needed. For a custom frontend domain, include its exact origin too. Do not use `*.vercel.app` or `*` with credentialed CORS. If `VITE_API_URL` is supplied, the production build validates that it uses HTTPS, has a public hostname, and ends in `/api`.
 
 Keep database credentials, `JWT_SECRET_KEY`, seed passwords, and privileged keys out of every `VITE_` variable. No Supabase admin or service-role key is needed in this application frontend.
 
